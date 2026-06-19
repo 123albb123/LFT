@@ -13,7 +13,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/123albb123/-/releases) 下载 `LanFileTransfer-win-x64.zip`。
+1. 从 [Releases](https://github.com/123albb123/LFT/releases) 下载 `LanFileTransfer-win-x64.zip`。
 2. 解压到具有写入权限的普通目录，不要直接在压缩包内运行。
 3. 双击 `内网文件传输工具.exe`。
 4. Windows 防火墙首次询问时，如需其他设备访问，只允许“专用网络”。
