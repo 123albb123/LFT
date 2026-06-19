@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.vs/
+artifacts/
+src/LanFileTransfer.App/Data/
+src/LanFileTransfer.App/Config/
+src/LanFileTransfer.App/Logs/
+*.user
+*.suo
+*.log

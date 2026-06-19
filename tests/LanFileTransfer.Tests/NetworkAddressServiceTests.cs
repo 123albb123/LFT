@@ -1,0 +1,29 @@
+using System.Net;
+using LanFileTransfer.App.Services;
+
+namespace LanFileTransfer.Tests;
+
+public sealed class NetworkAddressServiceTests
+{
+    [Theory]
+    [InlineData("10.0.0.1", true)]
+    [InlineData("172.16.5.4", true)]
+    [InlineData("172.31.255.1", true)]
+    [InlineData("192.168.88.12", true)]
+    [InlineData("169.254.1.2", true)]
+    [InlineData("8.8.8.8", false)]
+    [InlineData("172.32.0.1", false)]
+    public void RecognizesPrivateAndLinkLocalRanges(string text, bool expected)
+    {
+        Assert.Equal(expected, NetworkAddressService.IsPrivateOrLinkLocal(IPAddress.Parse(text)));
+    }
+
+    [Theory]
+    [InlineData("192.168.1.4", "192.168.1.220", 24, true)]
+    [InlineData("192.168.1.4", "192.168.2.4", 24, false)]
+    [InlineData("10.8.1.4", "10.8.200.9", 16, true)]
+    public void ComparesSubnetPrefixes(string left, string right, int prefix, bool expected)
+    {
+        Assert.Equal(expected, NetworkAddressService.IsInSameSubnet(IPAddress.Parse(left), IPAddress.Parse(right), prefix));
+    }
+}
