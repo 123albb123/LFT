@@ -43,6 +43,18 @@ public sealed class HttpFileServer(
             }
 
             var settings = config.Current;
+            try
+            {
+                config.ValidateCurrent();
+                if (!Directory.Exists(catalog.DirectoryPath))
+                {
+                    throw new DirectoryNotFoundException("共享目录不存在。");
+                }
+            }
+            catch (Exception exception)
+            {
+                throw ServerStartException.Wrap(exception, settings.Port);
+            }
             var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
             {
                 Args = [],
@@ -66,10 +78,10 @@ public sealed class HttpFileServer(
             {
                 await app.StartAsync(cancellationToken);
             }
-            catch
+            catch (Exception exception)
             {
                 await app.DisposeAsync();
-                throw;
+                throw ServerStartException.Wrap(exception, settings.Port);
             }
 
             _application = app;

@@ -17,6 +17,8 @@ public sealed class PortableConfigStore
     private readonly object _gate = new();
     private AppSettings _current = new();
 
+    public ConfigurationRecoveryInfo? RecoveryInfo { get; private set; }
+
     public PortableConfigStore(AppPaths paths)
     {
         _paths = paths;
@@ -33,9 +35,12 @@ public sealed class PortableConfigStore
         }
     }
 
+    public void ValidateCurrent() => Validate(Current, _paths);
+
     public AppSettings Load()
     {
         _paths.EnsurePortableDirectories();
+        RecoveryInfo = null;
         AppSettings settings;
         if (!File.Exists(_paths.SettingsFile))
         {
@@ -50,14 +55,38 @@ public sealed class PortableConfigStore
                        ?? new AppSettings();
             Validate(settings, _paths);
         }
-        catch
+        catch (Exception exception)
         {
-            var backup = $"{_paths.SettingsFile}.invalid-{DateTime.Now:yyyyMMddHHmmss}";
-            File.Copy(_paths.SettingsFile, backup, overwrite: true);
+            var backup = Path.Combine(
+                _paths.ConfigDirectory,
+                $"settings.invalid-{DateTime.Now:yyyyMMddHHmmss}.json");
+            Exception? backupException = null;
+            try
+            {
+                File.Copy(_paths.SettingsFile, backup, overwrite: false);
+            }
+            catch (Exception copyException)
+            {
+                backupException = copyException;
+                backup = null!;
+            }
+
+            RecoveryInfo = new ConfigurationRecoveryInfo(exception, backup, backupException);
             settings = new AppSettings();
         }
 
-        Replace(settings, persist: true);
+        try
+        {
+            Replace(settings, persist: true);
+        }
+        catch (Exception saveException) when (RecoveryInfo is not null)
+        {
+            RecoveryInfo = RecoveryInfo with { SaveException = saveException };
+            lock (_gate)
+            {
+                _current = settings;
+            }
+        }
         return settings;
     }
 
@@ -99,7 +128,34 @@ public sealed class PortableConfigStore
     {
         Directory.CreateDirectory(_paths.ConfigDirectory);
         var temporary = $"{_paths.SettingsFile}.{Guid.NewGuid():N}.tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(settings, JsonOptions));
-        File.Move(temporary, _paths.SettingsFile, overwrite: true);
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(settings, JsonOptions));
+            if (File.Exists(_paths.SettingsFile))
+            {
+                File.Replace(temporary, _paths.SettingsFile, null);
+            }
+            else
+            {
+                File.Move(temporary, _paths.SettingsFile);
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
+            catch
+            {
+                // 临时文件清理失败不应覆盖原始保存错误。
+            }
+        }
     }
+}
+
+public sealed record ConfigurationRecoveryInfo(Exception OriginalException, string? BackupFile, Exception? BackupException)
+{
+    public bool BackupSucceeded => BackupFile is not null && BackupException is null;
+    public Exception? SaveException { get; init; }
 }

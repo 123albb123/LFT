@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -25,16 +26,17 @@ public partial class MainWindow : Window
     private readonly NetworkAddressService _network;
     private readonly HttpFileServer _server;
     private bool _allowClose;
+    private bool _isClosing;
+    private string? _startupNotice;
 
-    public MainWindow()
+    public MainWindow(AppRuntime runtime)
     {
         InitializeComponent();
         DataContext = this;
 
-        _paths = new AppPaths();
-        _config = new PortableConfigStore(_paths);
-        _config.Load();
-        _log = new AppLogService(_paths);
+        _paths = runtime.Paths;
+        _config = runtime.Config;
+        _log = runtime.Log;
         _events = new EventHub();
         _transfers = new TransferRegistry(_events);
         _network = new NetworkAddressService();
@@ -49,6 +51,15 @@ public partial class MainWindow : Window
         RefreshNetworkAddresses();
         RefreshFiles();
         UpdateServiceUi();
+        if (_config.RecoveryInfo is { } recovery)
+        {
+            _startupNotice = recovery.BackupSucceeded
+                ? $"配置文件已损坏，已备份为：{Path.GetFileName(recovery.BackupFile!)}。已恢复为默认设置。"
+                : "配置文件已损坏，无法备份原文件，但已恢复为默认设置。";
+            _log.Error("配置已恢复", recovery.OriginalException);
+            if (recovery.BackupException is not null) _log.Warning($"配置备份失败：{recovery.BackupException.Message}");
+            if (recovery.SaveException is not null) _log.Warning($"默认配置保存失败：{recovery.SaveException.Message}");
+        }
     }
 
     public ObservableCollection<SharedFileItem> Files { get; } = [];
@@ -59,6 +70,11 @@ public partial class MainWindow : Window
         foreach (var entry in _log.Recent)
         {
             AppendLog(entry);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_startupNotice))
+        {
+            MessageBox.Show(this, _startupNotice, "配置已恢复", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         await StartServerWithFeedbackAsync();
@@ -80,16 +96,26 @@ public partial class MainWindow : Window
         UpdateServiceUi();
     }
 
-    private async Task StartServerWithFeedbackAsync()
+    private async Task StartServerWithFeedbackAsync(bool allowPortRecovery = true)
     {
         try
         {
             await _server.StartAsync();
         }
+        catch (ServerStartException exception) when (exception.Kind == ServerStartFailureKind.PortInUse && allowPortRecovery)
+        {
+            _log.Error("服务启动失败", exception);
+            await OfferPortRecoveryAsync(exception.Port);
+        }
+        catch (ServerStartException exception)
+        {
+            _log.Error("服务启动失败", exception);
+            ShowError("服务启动失败", exception.Message);
+        }
         catch (Exception exception)
         {
-            _log.Error("服务启动失败，可能是端口被占用", exception);
-            ShowError("服务启动失败", $"无法监听端口 {_config.Current.Port}。请确认端口未被占用，并允许 Windows 防火墙的专用网络访问。\n\n{exception.Message}");
+            _log.Error("服务启动失败", exception);
+            ShowError("服务启动失败", $"无法启动 HTTP 服务。\n\n{exception.Message}");
         }
         UpdateServiceUi();
     }
@@ -325,9 +351,10 @@ public partial class MainWindow : Window
 
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (_allowClose) return;
+        if (_allowClose || _isClosing) return;
         e.Cancel = true;
         if (_transfers.ActiveCount > 0 && MessageBox.Show(this, $"当前有 {_transfers.ActiveCount} 个传输正在进行。退出会中断传输，确定继续吗？", "传输进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        _isClosing = true;
         IsEnabled = false;
         try { await _server.StopAsync(); }
         catch (Exception exception) { _log.Error("退出时停止服务失败", exception); }
@@ -451,4 +478,50 @@ public partial class MainWindow : Window
     }
 
     private void ShowError(string title, string message) => MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+
+    private async Task OfferPortRecoveryAsync(int failedPort)
+    {
+        var choice = MessageBox.Show(this,
+            $"端口 {failedPort} 已被占用。\n\n选择“是”改用 28081；选择“否”自动寻找可用高位端口；选择“取消”保持当前设置。",
+            "端口被占用", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+        if (choice == MessageBoxResult.Cancel) return;
+
+        var port = choice == MessageBoxResult.Yes ? 28081 : FindAvailableHighPort();
+        if (port is null)
+        {
+            ShowError("未找到可用端口", "未能找到可用高位端口，请在基础设置中手动指定端口。");
+            return;
+        }
+
+        try
+        {
+            _config.Replace(_config.Current with { Port = port.Value }, persist: true);
+            LoadSettingsIntoUi(_config.Current);
+            UpdateAddress();
+            _log.Info($"端口已改为 {port.Value}，正在重新启动服务。");
+            await StartServerWithFeedbackAsync(allowPortRecovery: false);
+        }
+        catch (Exception exception)
+        {
+            _log.Error("自动切换端口失败", exception);
+            ShowError("切换端口失败", exception.Message);
+        }
+    }
+
+    private static int? FindAvailableHighPort()
+    {
+        for (var port = 28081; port <= 65535; port++)
+        {
+            try
+            {
+                using var listener = new TcpListener(IPAddress.Loopback, port);
+                listener.Start();
+                return port;
+            }
+            catch (SocketException)
+            {
+            }
+        }
+        return null;
+    }
 }
