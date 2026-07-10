@@ -175,6 +175,11 @@ public partial class MainWindow : Window
     private void EditFileButton_Click(object sender, RoutedEventArgs e)
     {
         if (FilesGrid.SelectedItem is not SharedFileItem file) return;
+        if (!IsEditableTextFile(file.Name))
+        {
+            ShowError("不支持直接编辑", "为避免执行危险文件，只允许直接编辑常见文本和配置文件。已知危险或未知类型请使用“打开文件目录”。");
+            return;
+        }
         try
         {
             Process.Start(new ProcessStartInfo(_catalog.ResolveExisting(file.Name)) { UseShellExecute = true });
@@ -382,8 +387,15 @@ public partial class MainWindow : Window
     {
         var selectedName = (FilesGrid.SelectedItem as SharedFileItem)?.Name;
         Files.Clear();
-        var index = 1;
-        foreach (var file in _catalog.GetFiles()) Files.Add(file with { Index = index++ });
+        try
+        {
+            var index = 1;
+            foreach (var file in _catalog.GetFiles()) Files.Add(file with { Index = index++ });
+        }
+        catch (IOException exception)
+        {
+            _log.Warning($"共享目录不可访问，暂时无法刷新列表：{exception.Message}");
+        }
         FileCountText.Text = $"{Files.Count} 个文件";
         if (selectedName is not null)
         {
@@ -524,4 +536,7 @@ public partial class MainWindow : Window
         }
         return null;
     }
+
+    private static bool IsEditableTextFile(string name) => Path.GetExtension(name).ToLowerInvariant() is
+        ".txt" or ".conf" or ".config" or ".json" or ".xml" or ".csv" or ".log" or ".md" or ".ini" or ".yaml" or ".yml" or ".properties";
 }

@@ -27,6 +27,7 @@ public sealed class HttpFileServer(
 {
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private WebApplication? _application;
+    private Timer? _transferCleanupTimer;
 
     public bool IsRunning => _application is not null;
 
@@ -85,6 +86,11 @@ public sealed class HttpFileServer(
             }
 
             _application = app;
+            _transferCleanupTimer = new Timer(
+                _ => transfers.CleanupExpired(TimeSpan.FromHours(2)),
+                null,
+                TimeSpan.FromMinutes(5),
+                TimeSpan.FromMinutes(5));
             log.Info($"服务启动 · 端口 {settings.Port}");
             RunningChanged?.Invoke(true);
         }
@@ -106,6 +112,8 @@ public sealed class HttpFileServer(
             }
 
             _application = null;
+            _transferCleanupTimer?.Dispose();
+            _transferCleanupTimer = null;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(5));
             try
@@ -119,6 +127,7 @@ public sealed class HttpFileServer(
             finally
             {
                 await app.DisposeAsync();
+                transfers.FailAll("服务已停止。");
                 catalog.CleanupTemporaryFiles();
             }
 
@@ -181,13 +190,24 @@ public sealed class HttpFileServer(
             });
         });
 
-        app.MapGet("/api/files", () => Results.Ok(catalog.GetFiles().Select(file => new
+        app.MapGet("/api/files", () =>
         {
-            file.Name,
-            file.Size,
-            file.LastModifiedUtc,
-            url = "/" + Uri.EscapeDataString(file.Name)
-        })));
+            try
+            {
+                return Results.Ok(catalog.GetFiles().Select(file => new
+                {
+                    file.Name,
+                    file.Size,
+                    file.LastModifiedUtc,
+                    url = "/" + Uri.EscapeDataString(file.Name)
+                }));
+            }
+            catch (IOException exception)
+            {
+                log.Error("读取文件列表失败", exception);
+                return Results.Problem("共享目录暂时不可访问。", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        });
 
         app.MapPost("/api/files", HandleUploadAsync);
         app.MapDelete("/api/files/{fileName}", HandleDeleteAsync);
@@ -334,6 +354,27 @@ public sealed class HttpFileServer(
         {
             if (tracked) transfers.Fail(transferId, "上传已中断。");
         }
+        catch (UnauthorizedAccessException exception)
+        {
+            if (tracked) transfers.Fail(transferId, "共享目录没有写入权限。");
+            log.Error("上传被拒绝", exception);
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = "共享目录没有写入权限。" });
+        }
+        catch (IOException exception)
+        {
+            if (tracked) transfers.Fail(transferId, "写入共享目录失败。");
+            log.Error("上传写入失败", exception);
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(new { error = "写入共享目录失败，请检查文件是否被占用或目录是否可用。" });
+        }
+        catch (Exception exception)
+        {
+            if (tracked) transfers.Fail(transferId, "上传失败。");
+            log.Error("上传发生未知错误", exception);
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(new { error = "上传失败，请稍后重试。" });
+        }
         finally
         {
             if (temporary is not null)
@@ -436,20 +477,40 @@ public sealed class HttpFileServer(
         var (contentType, canPreview) = SafeContentTypes.Get(info.Name);
         var forceDownload = context.Request.Query["download"] == "1" || !canPreview;
         var transferId = context.Request.Query["transferId"].ToString();
+        var transferLength = GetRequestedLength(context, info.Length);
         var tracked = context.Request.Method == HttpMethods.Get && forceDownload &&
                       !string.IsNullOrWhiteSpace(transferId) &&
-                      transfers.Begin(transferId, "download", info.Name, info.Length);
+                      transfers.Begin(transferId, "download", info.Name, transferLength);
 
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers.ContentSecurityPolicy = "sandbox; default-src 'none'";
         var etag = new EntityTagHeaderValue($"\"{info.Length:x}-{info.LastWriteTimeUtc.Ticks:x}\"");
-        var fileStream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete,
-            1024 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        FileStream fileStream;
+        try
+        {
+            fileStream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                1024 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+        }
+        catch (FileNotFoundException)
+        {
+            if (tracked) transfers.Fail(transferId, "文件已删除。");
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsJsonAsync(new { error = "文件不存在或已删除。" });
+            return;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            if (tracked) transfers.Fail(transferId, "文件不可访问。");
+            log.Error($"读取文件失败：{info.Name}", exception);
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(new { error = "文件暂时无法访问。" });
+            return;
+        }
         var result = Results.File(
             fileStream,
             contentType,
@@ -484,6 +545,7 @@ public sealed class HttpFileServer(
         }
         finally
         {
+            if (tracked) transfers.Fail(transferId, "下载未完成。");
             context.Response.Body = originalBody;
         }
     }
@@ -509,6 +571,20 @@ public sealed class HttpFileServer(
     {
         var errorCode = exception.HResult & 0xffff;
         return errorCode is 0x27 or 0x70;
+    }
+
+    private static long GetRequestedLength(HttpContext context, long fullLength)
+    {
+        var range = context.Request.GetTypedHeaders().Range;
+        var item = range?.Ranges.Count == 1 ? range.Ranges.First() : null;
+        if (item is null) return fullLength;
+
+        var from = item.From;
+        var to = item.To;
+        if (from is null && to is { } suffix) return Math.Min(suffix, fullLength);
+        var start = Math.Clamp(from ?? 0, 0, fullLength);
+        var end = Math.Clamp(to ?? fullLength - 1, start, fullLength - 1);
+        return Math.Max(0, end - start + 1);
     }
 
     private static string GetClientIp(HttpContext context)

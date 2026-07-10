@@ -34,19 +34,36 @@ public sealed class FileCatalog : IDisposable
     {
         try
         {
-            return Directory.EnumerateFiles(_directory, "*", SearchOption.TopDirectoryOnly)
-                .Where(path => !Path.GetFileName(path).StartsWith(".upload-", StringComparison.OrdinalIgnoreCase))
-                .Where(path => (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0)
-                .Select(path => new FileInfo(path))
-                .Select(info => new SharedFileItem(info.Name, info.Length, info.LastWriteTimeUtc))
+            var files = new List<SharedFileItem>();
+            foreach (var path in Directory.EnumerateFiles(_directory, "*", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    if (Path.GetFileName(path).StartsWith(".upload-", StringComparison.OrdinalIgnoreCase)) continue;
+                    if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) continue;
+                    var info = new FileInfo(path);
+                    files.Add(new SharedFileItem(info.Name, info.Length, info.LastWriteTimeUtc));
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    _log.Warning($"跳过无法读取的文件：{Path.GetFileName(path)}。{exception.Message}");
+                }
+            }
+
+            return files
                 .OrderByDescending(item => item.LastModifiedUtc)
                 .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToArray();
         }
         catch (DirectoryNotFoundException)
         {
-            Directory.CreateDirectory(_directory);
-            return [];
+            _log.Warning($"共享目录暂时不可访问：{_directory}");
+            throw new DirectoryNotFoundException($"共享目录暂时不可访问：{_directory}");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log.Error("读取共享目录失败", exception);
+            throw new IOException("共享目录暂时不可访问。", exception);
         }
     }
 
@@ -86,6 +103,7 @@ public sealed class FileCatalog : IDisposable
         }
 
         NotifyChanged();
+        CleanupTemporaryFiles();
     }
 
     public async Task<SharedFileItem> ImportAsync(string sourcePath, CancellationToken cancellationToken = default)
@@ -138,9 +156,27 @@ public sealed class FileCatalog : IDisposable
         await _writeGate.WaitAsync(cancellationToken);
         try
         {
+            if (!FileNamePolicy.IsSafeLeafName(requestedName, out var error)) throw new InvalidDataException(error);
+            if (FileNamePolicy.IsSystemRouteName(requestedName))
+            {
+                if (behavior == DuplicateBehavior.AutoRename)
+                {
+                    requestedName = "共享-" + requestedName;
+                    if (!FileNamePolicy.IsSafeLeafName(requestedName, out error)) throw new InvalidDataException(error);
+                }
+                else
+                {
+                    throw new InvalidDataException("文件名与系统路径冲突，请更换名称。");
+                }
+            }
+
             var destination = ResolveDestination(requestedName);
             if (File.Exists(destination))
             {
+                if ((File.GetAttributes(destination) & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new UnauthorizedAccessException("不允许覆盖符号链接或联接点文件。");
+                }
                 destination = behavior switch
                 {
                     DuplicateBehavior.Reject => throw new DuplicateFileException(requestedName),
@@ -178,9 +214,16 @@ public sealed class FileCatalog : IDisposable
 
     public void CleanupTemporaryFiles()
     {
-        foreach (var path in Directory.EnumerateFiles(_directory, ".upload-*.tmp", SearchOption.TopDirectoryOnly))
+        try
         {
-            TryDelete(path);
+            foreach (var path in Directory.EnumerateFiles(_directory, ".upload-*.tmp", SearchOption.TopDirectoryOnly))
+            {
+                TryDelete(path);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log.Warning($"清理临时文件失败：{exception.Message}");
         }
     }
 
@@ -201,7 +244,13 @@ public sealed class FileCatalog : IDisposable
         var extension = Path.GetExtension(requestedName);
         for (var index = 1; index < 100_000; index++)
         {
-            var candidate = ResolveDestination($"{stem} ({index}){extension}");
+            var suffix = $" ({index}){extension}";
+            var maximumStemLength = FileNamePolicy.MaxFileNameLength - suffix.Length;
+            if (maximumStemLength <= 0) throw new IOException("文件名过长，无法自动重命名。");
+            var shortenedStem = stem.Length > maximumStemLength ? stem[..maximumStemLength] : stem;
+            var candidateName = shortenedStem + suffix;
+            if (!FileNamePolicy.IsSafeLeafName(candidateName, out var error)) throw new InvalidDataException(error);
+            var candidate = ResolveDestination(candidateName);
             if (!File.Exists(candidate))
             {
                 return candidate;

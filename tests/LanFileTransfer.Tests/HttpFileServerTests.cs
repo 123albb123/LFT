@@ -88,6 +88,38 @@ public sealed class HttpFileServerTests
             Assert.Contains(log.Recent, entry => entry.Contains("下载 · 中文.conf · 127.0.0.1", StringComparison.Ordinal));
         }
 
+        using (var subscription = events.Subscribe())
+        {
+            using var rangedDownload = new HttpRequestMessage(HttpMethod.Get, "/%E4%B8%AD%E6%96%87.conf?download=1&transferId=ranged-download");
+            rangedDownload.Headers.Range = new RangeHeaderValue(1, 3);
+            var rangedResponse = await client.SendAsync(rangedDownload);
+            Assert.Equal(HttpStatusCode.PartialContent, rangedResponse.StatusCode);
+            Assert.Equal("bcd", await rangedResponse.Content.ReadAsStringAsync());
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            JsonElement completedTransfer = default;
+            while (await subscription.Reader.WaitToReadAsync(timeout.Token))
+            {
+                var message = JsonDocument.Parse(await subscription.Reader.ReadAsync(timeout.Token)).RootElement;
+                if (message.GetProperty("type").GetString() == "transfer" &&
+                    message.GetProperty("data").GetProperty("id").GetString() == "ranged-download" &&
+                    message.GetProperty("data").GetProperty("status").GetString() == "completed")
+                {
+                    completedTransfer = message.GetProperty("data").Clone();
+                    break;
+                }
+            }
+            Assert.Equal(3, completedTransfer.GetProperty("total").GetInt64());
+            Assert.Equal(100, completedTransfer.GetProperty("percent").GetInt32());
+        }
+
+        using (var reservedMultipart = new MultipartFormDataContent())
+        {
+            reservedMultipart.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("route")), "file", "web");
+            using var reservedUpload = new HttpRequestMessage(HttpMethod.Post, "/api/files") { Content = reservedMultipart };
+            reservedUpload.Headers.Add("X-Lan-Transfer", "1");
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(reservedUpload)).StatusCode);
+        }
+
         using var delete = new HttpRequestMessage(HttpMethod.Delete, "/api/files/%E4%B8%AD%E6%96%87.conf");
         delete.Headers.Add("X-Lan-Transfer", "1");
         Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(delete)).StatusCode);

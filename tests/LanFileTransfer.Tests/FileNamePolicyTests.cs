@@ -26,6 +26,15 @@ public sealed class FileNamePolicyTests
     }
 
     [Fact]
+    public void RejectsOverlongNamesAndRecognizesSystemRoutes()
+    {
+        var longName = new string('文', FileNamePolicy.MaxFileNameLength) + ".txt";
+        Assert.False(FileNamePolicy.IsSafeLeafName(longName, out _));
+        Assert.True(FileNamePolicy.IsSystemRouteName("web"));
+        Assert.True(FileNamePolicy.IsSystemRouteName("favicon.ico"));
+    }
+
+    [Fact]
     public void ResolvesOnlyDirectChildOfRoot()
     {
         using var temp = new TempDirectory();

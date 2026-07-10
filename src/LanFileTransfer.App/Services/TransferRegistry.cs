@@ -68,6 +68,23 @@ public sealed class TransferRegistry(EventHub events)
         }
     }
 
+    public void FailAll(string error)
+    {
+        foreach (var id in _active.Keys)
+        {
+            Fail(id, error);
+        }
+    }
+
+    public void CleanupExpired(TimeSpan maximumAge)
+    {
+        var threshold = DateTimeOffset.UtcNow - maximumAge;
+        foreach (var pair in _active)
+        {
+            if (pair.Value.StartedAt < threshold) Fail(pair.Key, "传输超时，已结束。");
+        }
+    }
+
     private void Publish(string id, TransferState state, long bytes, string status)
     {
         var percent = state.Total == 0 ? 100 : Math.Clamp((int)Math.Round(bytes * 100d / state.Total), 0, 100);
@@ -89,5 +106,6 @@ public sealed class TransferRegistry(EventHub events)
         public string FileName { get; } = fileName;
         public long Total { get; } = total;
         public long LastPublishedAt;
+        public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     }
 }

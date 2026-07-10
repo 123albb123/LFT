@@ -60,4 +60,43 @@ public sealed class FileCatalogTests
 
         Assert.Equal(new[] { "newer.txt", "older.txt" }, catalog.GetFiles().Select(file => file.Name));
     }
+
+    [Fact]
+    public async Task CleansTemporaryFilesAndSerializesAutoRename()
+    {
+        using var temp = new TempDirectory();
+        var paths = new AppPaths(temp.Path);
+        var config = new PortableConfigStore(paths); config.Load();
+        config.Replace(config.Current with { DuplicateBehavior = DuplicateBehavior.AutoRename }, persist: false);
+        using var catalog = new FileCatalog(paths, config, new EventHub(), new AppLogService(paths));
+        File.WriteAllText(catalog.CreateTemporaryPath(), "leftover");
+        catalog.CleanupTemporaryFiles();
+        Assert.Empty(Directory.EnumerateFiles(catalog.DirectoryPath, ".upload-*.tmp"));
+
+        var first = catalog.CreateTemporaryPath();
+        var second = catalog.CreateTemporaryPath();
+        await File.WriteAllTextAsync(first, "one");
+        await File.WriteAllTextAsync(second, "two");
+        var items = await Task.WhenAll(
+            catalog.CommitTemporaryAsync(first, "same.txt", DuplicateBehavior.AutoRename),
+            catalog.CommitTemporaryAsync(second, "same.txt", DuplicateBehavior.AutoRename));
+
+        Assert.Equal(2, items.Select(item => item.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public async Task RejectsSystemRouteNameUnlessAutoRenameIsSelected()
+    {
+        using var temp = new TempDirectory();
+        var paths = new AppPaths(temp.Path);
+        var config = new PortableConfigStore(paths); config.Load();
+        using var catalog = new FileCatalog(paths, config, new EventHub(), new AppLogService(paths));
+        var temporary = catalog.CreateTemporaryPath();
+        await File.WriteAllTextAsync(temporary, "web");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => catalog.CommitTemporaryAsync(temporary, "web", DuplicateBehavior.Reject));
+        Assert.True(File.Exists(temporary));
+        var item = await catalog.CommitTemporaryAsync(temporary, "web", DuplicateBehavior.AutoRename);
+        Assert.Equal("共享-web", item.Name);
+    }
 }

@@ -4,11 +4,17 @@ namespace LanFileTransfer.App.Services;
 
 public static partial class FileNamePolicy
 {
+    public const int MaxFileNameLength = 180;
     private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON", "PRN", "AUX", "NUL",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    };
+
+    private static readonly HashSet<string> SystemRouteNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "web", "api", "assets", "qr", "favicon.ico", "index.html", "app.css", "app.js", "settings", "files", "events"
     };
 
     public static bool IsSafeLeafName(string? name, out string error)
@@ -26,6 +32,12 @@ public static partial class FileNamePolicy
             return false;
         }
 
+        if (name.Length > MaxFileNameLength)
+        {
+            error = $"文件名不能超过 {MaxFileNameLength} 个字符。";
+            return false;
+        }
+
         if (name != Path.GetFileName(name) || name.Contains('/') || name.Contains('\\'))
         {
             error = "只允许共享目录根目录中的单个文件名。";
@@ -38,7 +50,7 @@ public static partial class FileNamePolicy
             return false;
         }
 
-        var stem = name.Split('.')[0];
+        var stem = Path.GetFileNameWithoutExtension(name).TrimEnd(' ', '.');
         if (ReservedNames.Contains(stem) || ControlCharacterRegex().IsMatch(name))
         {
             error = "文件名是 Windows 保留名称或包含控制字符。";
@@ -47,6 +59,8 @@ public static partial class FileNamePolicy
 
         return true;
     }
+
+    public static bool IsSystemRouteName(string name) => SystemRouteNames.Contains(name);
 
     public static string ResolveContainedPath(string rootDirectory, string name, bool mustExist = false)
     {
