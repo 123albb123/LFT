@@ -47,6 +47,7 @@ public partial class MainWindow : Window
         _server.RunningChanged += Server_RunningChanged;
         _log.EntryAdded += Log_EntryAdded;
         DuplicateBehaviorCombo.ItemsSource = new[] { "覆盖", "自动重命名", "拒绝" };
+        BindingModeCombo.ItemsSource = new[] { "自动推荐网卡", "指定当前 IP", "所有网卡" };
         LoadSettingsIntoUi(_config.Current);
         RefreshNetworkAddresses();
         RefreshFiles();
@@ -286,6 +287,9 @@ public partial class MainWindow : Window
                 LanOnly = LanOnlyCheckBox.IsChecked == true,
                 AllowWebUpload = AllowWebUploadCheckBox.IsChecked == true,
                 AllowWebDelete = AllowWebDeleteCheckBox.IsChecked == true,
+                ReadOnlyMode = ReadOnlyModeCheckBox.IsChecked == true,
+                BindingMode = BindingModeCombo.SelectedIndex switch { 1 => BindingMode.Specific, 2 => BindingMode.AllInterfaces, _ => BindingMode.Auto },
+                BoundAddress = BindingModeCombo.SelectedIndex == 1 ? GetDisplayIp() : null,
                 DuplicateBehavior = DuplicateBehaviorCombo.SelectedIndex switch { 1 => DuplicateBehavior.AutoRename, 2 => DuplicateBehavior.Reject, _ => DuplicateBehavior.Overwrite },
                 MaxUploadBytes = maxBytes
             };
@@ -299,6 +303,7 @@ public partial class MainWindow : Window
         var previous = _config.Current;
         var wasRunning = _server.IsRunning;
         var needsRestart = previous.Port != updated.Port || previous.MaxUploadBytes != updated.MaxUploadBytes ||
+                           previous.BindingMode != updated.BindingMode || !string.Equals(previous.BoundAddress, updated.BoundAddress, StringComparison.OrdinalIgnoreCase) ||
                            !string.Equals(_paths.ResolveUploadDirectory(previous.UploadDirectory), _paths.ResolveUploadDirectory(updated.UploadDirectory), StringComparison.OrdinalIgnoreCase);
         try
         {
@@ -329,6 +334,10 @@ public partial class MainWindow : Window
     private void OpenLogsButton_Click(object sender, RoutedEventArgs e) => OpenDirectory(_paths.LogsDirectory);
 
     private void IpAddressCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateAddress();
+
+    private void BindingModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateAddress();
+
+    private void RefreshNetworkButton_Click(object sender, RoutedEventArgs e) => RefreshNetworkAddresses();
 
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -408,7 +417,8 @@ public partial class MainWindow : Window
         var addresses = _network.GetDisplayAddresses().Select(address => address.ToString()).ToList();
         if (addresses.Count == 0) addresses.Add(IPAddress.Loopback.ToString());
         IpAddressCombo.ItemsSource = addresses;
-        IpAddressCombo.SelectedIndex = 0;
+        var configured = _config.Current.BoundAddress;
+        IpAddressCombo.SelectedItem = configured is not null && addresses.Contains(configured) ? configured : addresses[0];
         UpdateAddress();
     }
 
@@ -419,6 +429,8 @@ public partial class MainWindow : Window
         LanOnlyCheckBox.IsChecked = settings.LanOnly;
         AllowWebUploadCheckBox.IsChecked = settings.AllowWebUpload;
         AllowWebDeleteCheckBox.IsChecked = settings.AllowWebDelete;
+        ReadOnlyModeCheckBox.IsChecked = settings.ReadOnlyMode;
+        BindingModeCombo.SelectedIndex = settings.BindingMode switch { BindingMode.Specific => 1, BindingMode.AllInterfaces => 2, _ => 0 };
         DuplicateBehaviorCombo.SelectedIndex = settings.DuplicateBehavior switch { DuplicateBehavior.AutoRename => 1, DuplicateBehavior.Reject => 2, _ => 0 };
         MaxUploadGbTextBox.Text = (settings.MaxUploadBytes / (1024m * 1024 * 1024)).ToString("0.##", CultureInfo.CurrentCulture);
     }
@@ -441,7 +453,7 @@ public partial class MainWindow : Window
 
     private string GetBaseAddress()
     {
-        var ip = IpAddressCombo.SelectedItem?.ToString() ?? IPAddress.Loopback.ToString();
+        var ip = _server.BoundAddress?.ToString() ?? IpAddressCombo.SelectedItem?.ToString() ?? IPAddress.Loopback.ToString();
         return $"http://{ip}:{_config.Current.Port}";
     }
 

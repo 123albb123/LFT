@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using LanFileTransfer.App.Models;
 
 namespace LanFileTransfer.App.Services;
 
@@ -19,7 +20,11 @@ public sealed class NetworkAddressService
 
     public bool IsLocalNetworkClient(IPAddress? remoteAddress)
     {
-        if (remoteAddress is null || IPAddress.IsLoopback(remoteAddress))
+        if (remoteAddress is null)
+        {
+            return false;
+        }
+        if (IPAddress.IsLoopback(remoteAddress))
         {
             return true;
         }
@@ -37,6 +42,21 @@ public sealed class NetworkAddressService
         return GetPrivateUnicastNetworks().Any(network =>
             network.Address.AddressFamily == remoteAddress.AddressFamily &&
             IsInSameSubnet(network.Address, remoteAddress, network.PrefixLength));
+    }
+
+    public IPAddress ResolveBindingAddress(BindingMode mode, string? configuredAddress)
+    {
+        var addresses = GetDisplayAddresses();
+        if (mode == BindingMode.Specific)
+        {
+            if (!IPAddress.TryParse(configuredAddress, out var requested) || !addresses.Contains(requested))
+            {
+                throw new InvalidOperationException("已保存的绑定 IP 不可用，请重新选择网卡或使用自动推荐。");
+            }
+            return requested;
+        }
+
+        return addresses.FirstOrDefault() ?? IPAddress.Loopback;
     }
 
     internal static bool IsInSameSubnet(IPAddress left, IPAddress right, int prefixLength)

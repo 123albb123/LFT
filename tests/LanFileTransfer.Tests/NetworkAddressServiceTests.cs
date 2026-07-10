@@ -26,4 +26,19 @@ public sealed class NetworkAddressServiceTests
     {
         Assert.Equal(expected, NetworkAddressService.IsInSameSubnet(IPAddress.Parse(left), IPAddress.Parse(right), prefix));
     }
+
+    [Fact]
+    public void DoesNotTrustMissingRemoteAddress()
+    {
+        Assert.False(new NetworkAddressService().IsLocalNetworkClient(null));
+    }
+
+    [Theory]
+    [InlineData("::1", false)]
+    [InlineData("fe80::1", true)]
+    [InlineData("fd00::1", true)]
+    public void RecognizesLocalIpv6Ranges(string text, bool expected)
+    {
+        Assert.Equal(expected, NetworkAddressService.IsPrivateOrLinkLocal(IPAddress.Parse(text)));
+    }
 }

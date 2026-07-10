@@ -144,6 +144,8 @@
                     <Button x:Name="StopButton" Content="停止服务" Style="{StaticResource DangerButton}" Click="StopButton_Click"/>
                     <Button Content="打开 Web 页面" Click="OpenWebButton_Click"/>
                     <Button Content="显示二维码" Click="QrButton_Click"/>
+                    <ComboBox x:Name="BindingModeCombo" Width="130" SelectionChanged="BindingModeCombo_SelectionChanged"/>
+                    <Button Content="刷新网卡" Click="RefreshNetworkButton_Click"/>
                     <TextBlock x:Name="LanWarningText" Margin="5,8,0,0" Foreground="{StaticResource Muted}" Text="局域网免登录，请勿分享敏感文件"/>
                 </WrapPanel>
             </Grid>
@@ -219,6 +221,7 @@
                             <CheckBox x:Name="LanOnlyCheckBox" Content="仅局域网" Margin="0,4,14,4"/>
                             <CheckBox x:Name="AllowWebUploadCheckBox" Content="Web 上传" Margin="0,4,14,4"/>
                             <CheckBox x:Name="AllowWebDeleteCheckBox" Content="Web 删除" Margin="0,4,0,4"/>
+                            <CheckBox x:Name="ReadOnlyModeCheckBox" Content="只读模式" Margin="14,4,0,4"/>
                         </WrapPanel>
                         <Button Grid.Column="1" Content="保存设置" Style="{StaticResource PrimaryButton}" Margin="8,3,0,0" VerticalAlignment="Top" Click="SaveSettingsButton_Click"/>
                     </Grid>

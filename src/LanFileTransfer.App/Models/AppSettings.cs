@@ -7,6 +7,13 @@ public enum DuplicateBehavior
     Reject
 }
 
+public enum BindingMode
+{
+    Auto,
+    Specific,
+    AllInterfaces
+}
+
 public sealed record AppSettings
 {
     public int Port { get; init; } = 28080;
@@ -14,6 +21,9 @@ public sealed record AppSettings
     public bool LanOnly { get; init; } = true;
     public bool AllowWebUpload { get; init; } = true;
     public bool AllowWebDelete { get; init; }
+    public bool ReadOnlyMode { get; init; }
+    public BindingMode BindingMode { get; init; } = BindingMode.Auto;
+    public string? BoundAddress { get; init; }
     public DuplicateBehavior DuplicateBehavior { get; init; } = DuplicateBehavior.Overwrite;
     public long MaxUploadBytes { get; init; } = 2L * 1024 * 1024 * 1024;
 }

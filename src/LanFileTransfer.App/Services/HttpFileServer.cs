@@ -30,6 +30,7 @@ public sealed class HttpFileServer(
     private Timer? _transferCleanupTimer;
 
     public bool IsRunning => _application is not null;
+    public IPAddress? BoundAddress { get; private set; }
 
     public event Action<bool>? RunningChanged;
 
@@ -44,6 +45,7 @@ public sealed class HttpFileServer(
             }
 
             var settings = config.Current;
+            IPAddress? boundAddress = null;
             try
             {
                 config.ValidateCurrent();
@@ -68,7 +70,16 @@ public sealed class HttpFileServer(
                 options.AddServerHeader = false;
                 options.Limits.MaxRequestBodySize = settings.MaxUploadBytes + 16L * 1024 * 1024;
                 options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
-                options.ListenAnyIP(settings.Port);
+                if (settings.BindingMode == BindingMode.AllInterfaces)
+                {
+                    options.ListenAnyIP(settings.Port);
+                }
+                else
+                {
+                    boundAddress = network.ResolveBindingAddress(settings.BindingMode, settings.BoundAddress);
+                    options.Listen(IPAddress.Loopback, settings.Port);
+                    if (!IPAddress.IsLoopback(boundAddress)) options.Listen(boundAddress, settings.Port);
+                }
             });
             builder.Services.AddProblemDetails();
 
@@ -86,6 +97,7 @@ public sealed class HttpFileServer(
             }
 
             _application = app;
+            BoundAddress = boundAddress;
             _transferCleanupTimer = new Timer(
                 _ => transfers.CleanupExpired(TimeSpan.FromHours(2)),
                 null,
@@ -112,6 +124,7 @@ public sealed class HttpFileServer(
             }
 
             _application = null;
+            BoundAddress = null;
             _transferCleanupTimer?.Dispose();
             _transferCleanupTimer = null;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -183,10 +196,13 @@ public sealed class HttpFileServer(
             var settings = config.Current;
             return Results.Ok(new
             {
+                settings.LanOnly,
+                settings.ReadOnlyMode,
                 settings.AllowWebUpload,
                 settings.AllowWebDelete,
                 settings.MaxUploadBytes,
-                duplicateBehavior = settings.DuplicateBehavior.ToString()
+                duplicateBehavior = settings.DuplicateBehavior.ToString(),
+                bindingMode = settings.BindingMode.ToString()
             });
         });
 
@@ -218,10 +234,10 @@ public sealed class HttpFileServer(
     private async Task HandleUploadAsync(HttpContext context)
     {
         var settings = config.Current;
-        if (!settings.AllowWebUpload)
+        if (settings.ReadOnlyMode || !settings.AllowWebUpload)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(new { error = "Web 上传已关闭。" });
+            await context.Response.WriteAsJsonAsync(new { error = settings.ReadOnlyMode ? "当前为只读模式，禁止上传。" : "Web 上传已关闭。" });
             return;
         }
 
@@ -386,10 +402,10 @@ public sealed class HttpFileServer(
 
     private async Task HandleDeleteAsync(HttpContext context, string fileName)
     {
-        if (!config.Current.AllowWebDelete)
+        if (config.Current.ReadOnlyMode || !config.Current.AllowWebDelete)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(new { error = "Web 删除已关闭。" });
+            await context.Response.WriteAsJsonAsync(new { error = config.Current.ReadOnlyMode ? "当前为只读模式，禁止删除。" : "Web 删除已关闭。" });
             return;
         }
 

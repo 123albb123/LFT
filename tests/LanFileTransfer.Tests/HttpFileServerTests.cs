@@ -153,6 +153,21 @@ public sealed class HttpFileServerTests
         Assert.Empty(environment.Catalog.GetFiles());
     }
 
+    [Fact]
+    public async Task ReadOnlyModeRejectsDirectUploadAndDeleteRequests()
+    {
+        await using var environment = await ServerEnvironment.StartAsync(maxUploadBytes: 1024, readOnlyMode: true);
+        using var multipart = new MultipartFormDataContent();
+        multipart.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("blocked")), "file", "blocked.txt");
+        using var upload = new HttpRequestMessage(HttpMethod.Post, "/api/files") { Content = multipart };
+        upload.Headers.Add("X-Lan-Transfer", "1");
+        Assert.Equal(HttpStatusCode.Forbidden, (await environment.Client.SendAsync(upload)).StatusCode);
+
+        using var delete = new HttpRequestMessage(HttpMethod.Delete, "/api/files/blocked.txt");
+        delete.Headers.Add("X-Lan-Transfer", "1");
+        Assert.Equal(HttpStatusCode.Forbidden, (await environment.Client.SendAsync(delete)).StatusCode);
+    }
+
     private static int GetFreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -170,11 +185,11 @@ public sealed class HttpFileServerTests
         }
         public FileCatalog Catalog { get; }
         public HttpClient Client { get; }
-        public static async Task<ServerEnvironment> StartAsync(long maxUploadBytes)
+        public static async Task<ServerEnvironment> StartAsync(long maxUploadBytes, bool readOnlyMode = false)
         {
             var temp = new TempDirectory(); var port = GetFreePort(); var paths = new AppPaths(temp.Path);
             var config = new PortableConfigStore(paths); config.Load();
-            config.Replace(new AppSettings { Port = port, MaxUploadBytes = maxUploadBytes }, persist: false);
+            config.Replace(new AppSettings { Port = port, MaxUploadBytes = maxUploadBytes, ReadOnlyMode = readOnlyMode }, persist: false);
             var log = new AppLogService(paths); var events = new EventHub(); var transfers = new TransferRegistry(events);
             var catalog = new FileCatalog(paths, config, events, log);
             var server = new HttpFileServer(config, catalog, new NetworkAddressService(), events, transfers, new WebAssetProvider(), log);
