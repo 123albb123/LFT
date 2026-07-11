@@ -7,15 +7,27 @@ namespace LanFileTransfer.App.Services;
 
 public sealed class NetworkAddressService
 {
+    private static readonly string[] VirtualKeywords = ["tailscale", "zerotier", "wintun", "wireguard", "tap", "clash", "vmware", "virtualbox", "hyper-v", "vethernet", "docker"];
+
+    public sealed record NetworkAddressOption(IPAddress Address, int PrefixLength, string AdapterName, string AdapterDescription, NetworkInterfaceType NetworkInterfaceType, bool IsVirtual, bool IsVpnLike, bool IsRecommended)
+    {
+        public override string ToString() => $"{Address} /{PrefixLength} · {AdapterName} · {(IsRecommended ? "推荐" : IsVpnLike ? "虚拟/VPN" : IsVirtual ? "虚拟网卡" : NetworkInterfaceType.ToString())}";
+    }
+
+    public IReadOnlyList<NetworkAddressOption> GetDisplayOptions()
+    {
+        return GetPrivateUnicastNetworks().Select(item =>
+        {
+            var text = item.AdapterName + " " + item.AdapterDescription;
+            var virtualLike = VirtualKeywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+            var preferredType = item.Type is NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.Ethernet;
+            return new NetworkAddressOption(item.Address, item.PrefixLength, item.AdapterName, item.AdapterDescription, item.Type, virtualLike, virtualLike, preferredType && !virtualLike);
+        }).OrderBy(option => option.IsRecommended ? 0 : 1).ThenBy(option => AddressRank(option.Address)).ThenBy(option => option.AdapterName).ToArray();
+    }
+
     public IReadOnlyList<IPAddress> GetDisplayAddresses()
     {
-        return GetPrivateUnicastNetworks()
-            .Select(item => item.Address)
-            .Where(address => address.AddressFamily == AddressFamily.InterNetwork)
-            .Distinct()
-            .OrderBy(AddressRank)
-            .ThenBy(address => address.ToString(), StringComparer.Ordinal)
-            .ToArray();
+        return GetDisplayOptions().Select(option => option.Address).Distinct().ToArray();
     }
 
     public bool IsLocalNetworkClient(IPAddress? remoteAddress)
@@ -127,7 +139,7 @@ public sealed class NetworkAddressService
                         : unicast.Address;
                     if (IsPrivateOrLinkLocal(address))
                     {
-                        result.Add(new NetworkPrefix(address, unicast.PrefixLength));
+                        result.Add(new NetworkPrefix(address, unicast.PrefixLength, adapter.Name, adapter.Description, adapter.NetworkInterfaceType));
                     }
                 }
             }
@@ -148,5 +160,5 @@ public sealed class NetworkAddressService
         return 3;
     }
 
-    private sealed record NetworkPrefix(IPAddress Address, int PrefixLength);
+    private sealed record NetworkPrefix(IPAddress Address, int PrefixLength, string AdapterName, string AdapterDescription, NetworkInterfaceType Type);
 }

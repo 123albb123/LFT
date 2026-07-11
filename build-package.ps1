@@ -28,10 +28,17 @@ dotnet publish (Join-Path $root "src\LanFileTransfer.App\LanFileTransfer.App.csp
     -c $Configuration `
     -r win-x64 `
     --self-contained true `
+    -p:PublishSingleFile=true `
+    -p:UseAppHost=true `
+    -p:AssemblyName=内网文件传输工具 `
     -o $publish
 if ($LASTEXITCODE -ne 0) { throw "发布失败，已停止打包。" }
 
-Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination (Join-Path $publish "README.md")
+Get-ChildItem -LiteralPath $publish -Recurse -File | Where-Object { $_.Extension -eq '.pdb' } | Remove-Item -Force
+
+$releaseReadme = Get-Content -LiteralPath (Join-Path $root "README.md") -Raw -Encoding utf8
+$releaseReadme = $releaseReadme.Replace("docs/USER-GUIDE.zh-CN.md", "USER-GUIDE.zh-CN.md")
+Set-Content -LiteralPath (Join-Path $publish "README.md") -Value $releaseReadme -Encoding utf8
 Copy-Item -LiteralPath (Join-Path $root "docs\USER-GUIDE.zh-CN.md") -Destination (Join-Path $publish "USER-GUIDE.zh-CN.md")
 Copy-Item -LiteralPath (Join-Path $root "CHANGELOG.md") -Destination (Join-Path $publish "CHANGELOG.md")
 $buildTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss K"
@@ -39,6 +46,8 @@ $buildTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss K"
 $checksums = Get-ChildItem -LiteralPath $publish -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLowerInvariant())  $($_.Name)" }
 $checksums | Set-Content -LiteralPath (Join-Path $publish "SHA256SUMS.txt") -Encoding ascii
 if ((Get-ChildItem -LiteralPath $publish -Filter *.exe).Name -ne "内网文件传输工具.exe") { throw "发布目录只能包含中文 EXE：内网文件传输工具.exe" }
+if ((Get-ChildItem -LiteralPath $publish -Recurse -File | Where-Object { $_.Extension -eq '.pdb' -or $_.Name -like '*Tests*.dll' }).Count -gt 0) { throw "发布目录不允许包含 PDB 或测试 DLL。" }
+if (-not (Test-Path (Join-Path $publish "USER-GUIDE.zh-CN.md"))) { throw "发布包缺少使用说明。" }
 Compress-Archive -Path (Join-Path $publish "*") -DestinationPath $zip -CompressionLevel Optimal
 $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 "$zipHash  $(Split-Path -Leaf $zip)" | Set-Content -LiteralPath $zipHashFile -Encoding ascii

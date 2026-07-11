@@ -476,11 +476,11 @@ public partial class MainWindow : Window
 
     private void RefreshNetworkAddresses()
     {
-        var addresses = _network.GetDisplayAddresses().Select(address => address.ToString()).ToList();
-        if (addresses.Count == 0) addresses.Add(IPAddress.Loopback.ToString());
+        var addresses = _network.GetDisplayOptions().ToList();
+        if (addresses.Count == 0) addresses.Add(new NetworkAddressService.NetworkAddressOption(IPAddress.Loopback, 32, "本机", "Loopback", System.Net.NetworkInformation.NetworkInterfaceType.Loopback, false, false, true));
         IpAddressCombo.ItemsSource = addresses;
         var configured = _config.Current.BoundAddress;
-        IpAddressCombo.SelectedItem = configured is not null && addresses.Contains(configured) ? configured : addresses[0];
+        IpAddressCombo.SelectedItem = addresses.FirstOrDefault(item => item.Address.ToString() == configured) ?? addresses[0];
         UpdateAddress();
     }
 
@@ -515,13 +515,13 @@ public partial class MainWindow : Window
 
     private string GetBaseAddress()
     {
-        var ip = _server.BoundAddress?.ToString() ?? IpAddressCombo.SelectedItem?.ToString() ?? IPAddress.Loopback.ToString();
+        var ip = _server.BoundAddress?.ToString() ?? GetDisplayIp();
         return $"http://{ip}:{_config.Current.Port}";
     }
 
     private string GetWebAddress() => $"{GetBaseAddress()}/web";
 
-    private string GetDisplayIp() => IpAddressCombo.SelectedItem?.ToString() ?? IPAddress.Loopback.ToString();
+    private string GetDisplayIp() => (IpAddressCombo.SelectedItem as NetworkAddressService.NetworkAddressOption)?.Address.ToString() ?? IPAddress.Loopback.ToString();
 
     private void AppendLog(string entry)
     {
