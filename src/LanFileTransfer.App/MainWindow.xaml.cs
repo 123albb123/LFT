@@ -28,6 +28,8 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private bool _isClosing;
     private string? _startupNotice;
+    private string _fileSearch = string.Empty;
+    private CancellationTokenSource? _importCancellation;
 
     public MainWindow(AppRuntime runtime)
     {
@@ -132,15 +134,21 @@ public partial class MainWindow : Window
 
     private async Task ImportFilesAsync(IEnumerable<string> paths)
     {
-        IsEnabled = false;
+        _importCancellation?.Cancel();
+        _importCancellation = new CancellationTokenSource();
         try
         {
             foreach (var path in paths)
             {
                 try
                 {
-                    var item = await _catalog.ImportAsync(path);
+                    var item = await _catalog.ImportAsync(path, _importCancellation.Token);
                     _log.Info($"添加 · {item.Name} · 本机 {GetDisplayIp()}");
+                }
+                catch (OperationCanceledException) when (_importCancellation.IsCancellationRequested)
+                {
+                    _log.Info("本地导入已取消。");
+                    break;
                 }
                 catch (Exception exception)
                 {
@@ -151,9 +159,15 @@ public partial class MainWindow : Window
         }
         finally
         {
-            IsEnabled = true;
+            _importCancellation?.Dispose();
+            _importCancellation = null;
             RefreshFiles();
         }
+    }
+
+    private void AboutButton_Click(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(this, $"内网文件传输工具\n版本 1.1.0\nWindows x64 自包含完整绿色版\n\n程序目录：{_paths.BaseDirectory}\n共享目录：{_catalog.DirectoryPath}\n配置目录：{_paths.ConfigDirectory}\n日志目录：{_paths.LogsDirectory}\n端口：{_config.Current.Port}\n状态：{(_server.IsRunning ? "服务运行中" : "服务已停止")}", "关于", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private async void DeleteFilesButton_Click(object sender, RoutedEventArgs e)
@@ -333,6 +347,16 @@ public partial class MainWindow : Window
 
     private void OpenLogsButton_Click(object sender, RoutedEventArgs e) => OpenDirectory(_paths.LogsDirectory);
 
+    private async void CopyLogsButton_Click(object sender, RoutedEventArgs e) => await CopyTextWithFeedbackAsync(LogTextBox.Text);
+
+    private void ClearLogDisplayButton_Click(object sender, RoutedEventArgs e) => LogTextBox.Clear();
+
+    private void FileSearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _fileSearch = FileSearchTextBox.Text.Trim();
+        RefreshFiles();
+    }
+
     private void IpAddressCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateAddress();
 
     private void BindingModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateAddress();
@@ -399,7 +423,7 @@ public partial class MainWindow : Window
         try
         {
             var index = 1;
-            foreach (var file in _catalog.GetFiles()) Files.Add(file with { Index = index++ });
+            foreach (var file in _catalog.GetFiles().Where(file => string.IsNullOrWhiteSpace(_fileSearch) || file.Name.Contains(_fileSearch, StringComparison.CurrentCultureIgnoreCase))) Files.Add(file with { Index = index++ });
         }
         catch (IOException exception)
         {

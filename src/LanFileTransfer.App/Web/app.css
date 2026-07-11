@@ -21,6 +21,8 @@ body {
   font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
 }
 button, input { font: inherit; }
+.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.search { min-height:40px; max-width:170px; padding:0 10px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--ink); }
 button { color: inherit; }
 .shell { width: min(1040px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 28px; }
 .hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 28px; }
@@ -76,10 +78,18 @@ footer { padding: 5px 0; color: #7b877f; text-align: center; font-size: 12px; }
   .subtitle { font-size: 14px; }
   .card { padding: 17px; border-radius: 16px; }
   .section-title { align-items: flex-start; }
+  .search { max-width:130px; }
   .drop-zone { min-height: 132px; }
   .file-row { grid-template-columns: 1fr; gap: 11px; }
   .file-actions { padding-left: 52px; flex-wrap: wrap; }
   .file-actions .button { flex: 1; }
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ink:#e6f0e9; --muted:#b0c0b5; --line:#34463a; --paper:#18231c; --canvas:#101711; --green-soft:#1d422a; --shadow:none; }
+  body { background:linear-gradient(180deg,#111a13,var(--canvas)); }
+  .card,.file-row { background:var(--paper); }
+  .button.ghost,.transfer-panel,.drop-zone { background:#1c281f; color:var(--ink); }
+  .search { background:#142018; }
 }
 @media (max-width: 420px) {
   .eyebrow { display: none; }

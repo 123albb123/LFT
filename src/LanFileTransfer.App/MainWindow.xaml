@@ -125,9 +125,7 @@
                     <TextBlock Text="局域网文件收发" Foreground="{StaticResource Muted}" FontSize="11" Margin="1,1,0,0"/>
                 </StackPanel>
             </StackPanel>
-            <Border Grid.Column="1" Background="{StaticResource GreenSoft}" CornerRadius="14" Padding="11,6" VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal"><Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#A4AAA6" Margin="0,0,7,0"/><TextBlock x:Name="StatusText" Text="正在启动…" Foreground="{StaticResource Green}" FontWeight="SemiBold"/></StackPanel>
-            </Border>
+            <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="关于" Padding="10,5" MinHeight="30" Click="AboutButton_Click"/><Border Background="{StaticResource GreenSoft}" CornerRadius="14" Padding="11,6" VerticalAlignment="Center"><StackPanel Orientation="Horizontal"><Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#A4AAA6" Margin="0,0,7,0"/><TextBlock x:Name="StatusText" Text="正在启动…" Foreground="{StaticResource Green}" FontWeight="SemiBold"/></StackPanel></Border></StackPanel>
         </Grid>
 
         <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,10" Padding="15,12">
@@ -161,10 +159,15 @@
                         <TextBlock x:Name="FileCountText" Text="0 个文件" Foreground="{StaticResource Muted}" Margin="10,3,0,0"/>
                         <TextBlock x:Name="ContextHintText" Text="· 右键文件可进行更多操作" Foreground="#829087" Margin="8,3,0,0"/>
                     </StackPanel>
-                    <Button Grid.Column="1" Content="添加文件" Style="{StaticResource PrimaryButton}" Margin="0" VerticalAlignment="Center" Click="AddFilesButton_Click"/>
+                    <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBox x:Name="FileSearchTextBox" Width="160" Margin="0,0,7,0" ToolTip="按文件名搜索" TextChanged="FileSearchTextBox_TextChanged"/>
+                        <Button Content="添加文件" Style="{StaticResource PrimaryButton}" Click="AddFilesButton_Click"/>
+                        <Button Content="删除选中" Click="DeleteFilesButton_Click"/>
+                        <Button Content="打开目录" Margin="0" Click="OpenDirectoryButton_Click"/>
+                    </WrapPanel>
                 </Grid>
                 <DataGrid x:Name="FilesGrid" Grid.Row="1" ItemsSource="{Binding Files}" AutoGenerateColumns="False"
-                          SelectionMode="Single" SelectionUnit="FullRow" IsReadOnly="True" BorderThickness="0"
+                          SelectionMode="Extended" SelectionUnit="FullRow" IsReadOnly="True" BorderThickness="0"
                           CanUserResizeColumns="True" CanUserSortColumns="True" HeadersVisibility="Column"
                           EnableRowVirtualization="True" EnableColumnVirtualization="True" GridLinesVisibility="None"
                           AlternationCount="2" ColumnHeaderStyle="{StaticResource FileColumnHeader}"
@@ -230,7 +233,7 @@
             <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                    <Grid Margin="14,0"><TextBlock Text="运行日志" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Content="打开日志目录" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0" Padding="10,5" MinHeight="30" Click="OpenLogsButton_Click"/></Grid>
+                    <Grid Margin="14,0"><TextBlock Text="运行日志" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/><WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center"><Button Content="复制" Padding="10,5" MinHeight="30" Click="CopyLogsButton_Click"/><Button Content="清空显示" Padding="10,5" MinHeight="30" Click="ClearLogDisplayButton_Click"/><Button Content="打开日志目录" Margin="0" Padding="10,5" MinHeight="30" Click="OpenLogsButton_Click"/></WrapPanel></Grid>
                     <TextBox x:Name="LogTextBox" Grid.Row="1" Margin="10,0,10,10" IsReadOnly="True" TextWrapping="NoWrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas, Microsoft YaHei UI" FontSize="11.5" Background="#F8FAF8"/>
                 </Grid>
             </Border>

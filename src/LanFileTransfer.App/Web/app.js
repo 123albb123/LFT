@@ -1,12 +1,12 @@
 (() => {
   'use strict';
   const $ = (selector) => document.querySelector(selector);
-  const state = { settings: null, files: [], currentTransferId: null };
+  const state = { settings: null, files: [], currentTransferId: null, query: '', sort: 'time-desc', xhr: null, source: null };
   const elements = {
     connection: $('#connectionBadge'), uploadCard: $('#uploadCard'), uploadHint: $('#uploadHint'),
     choose: $('#chooseButton'), input: $('#fileInput'), drop: $('#dropZone'), panel: $('#transferPanel'),
     name: $('#transferName'), percent: $('#transferPercent'), bar: $('#transferBar'), status: $('#transferStatus'),
-    count: $('#fileCount'), list: $('#fileList'), empty: $('#emptyState'), refresh: $('#refreshButton'), toast: $('#toast')
+    count: $('#fileCount'), total: $('#totalSize'), list: $('#fileList'), empty: $('#emptyState'), refresh: $('#refreshButton'), toast: $('#toast'), search: $('#searchInput'), sort: $('#sortSelect'), cancel: $('#cancelUploadButton')
   };
 
   const formatBytes = (value) => {
@@ -39,7 +39,9 @@
     const response = await fetch('/api/settings', { cache: 'no-store' });
     if (!response.ok) throw new Error(await readError(response));
     state.settings = await response.json();
-    elements.uploadCard.hidden = !state.settings.allowWebUpload;
+    const readOnly = state.settings.readOnlyMode;
+    elements.uploadCard.hidden = readOnly || !state.settings.allowWebUpload;
+    if (readOnly) toast('当前为只读模式，仅可查看和下载');
     elements.uploadHint.textContent = `单文件上限 ${formatBytes(state.settings.maxUploadBytes)} · 同名${state.settings.duplicateBehavior === 'Overwrite' ? '覆盖' : state.settings.duplicateBehavior === 'AutoRename' ? '自动重命名' : '拒绝'}`;
   }
   async function loadFiles() {
@@ -50,9 +52,11 @@
   }
   function renderFiles() {
     elements.list.replaceChildren();
-    elements.count.textContent = state.files.length;
-    elements.empty.hidden = state.files.length !== 0;
-    for (const file of state.files) {
+    const files = state.files.filter(file => file.name.toLocaleLowerCase().includes(state.query.toLocaleLowerCase())).sort((a,b) => state.sort === 'name-asc' ? a.name.localeCompare(b.name, 'zh-CN') : state.sort === 'size-desc' ? b.size-a.size : new Date(b.lastModifiedUtc)-new Date(a.lastModifiedUtc));
+    elements.count.textContent = files.length;
+    elements.total.textContent = formatBytes(files.reduce((sum, file) => sum + file.size, 0));
+    elements.empty.hidden = files.length !== 0;
+    for (const file of files) {
       const row = document.createElement('article'); row.className = 'file-row';
       const main = document.createElement('div'); main.className = 'file-main';
       const icon = document.createElement('span'); icon.className = 'file-icon';
@@ -63,7 +67,7 @@
       copy.append(link, meta); main.append(icon, copy);
       const actions = document.createElement('div'); actions.className = 'file-actions';
       actions.append(actionButton('下载', () => download(file)), actionButton('复制链接', () => copyLink(file.name)));
-      if (state.settings?.allowWebDelete) actions.append(actionButton('删除', () => removeFile(file.name), 'danger'));
+      if (state.settings?.allowWebDelete && !state.settings?.readOnlyMode) actions.append(actionButton('删除', () => removeFile(file.name), 'danger'));
       row.append(main, actions); elements.list.append(row);
     }
   }
@@ -104,7 +108,7 @@
   function uploadOne(file) {
     return new Promise((resolve) => {
       const id = transferId(); state.currentTransferId = id; const form = new FormData(); form.append('file', file, file.name);
-      const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/files'); xhr.setRequestHeader('X-Lan-Transfer', '1'); xhr.setRequestHeader('X-Transfer-Id', id); xhr.setRequestHeader('X-File-Size', String(file.size));
+      const xhr = new XMLHttpRequest(); state.xhr = xhr; elements.cancel.hidden = false; xhr.open('POST', '/api/files'); xhr.setRequestHeader('X-Lan-Transfer', '1'); xhr.setRequestHeader('X-Transfer-Id', id); xhr.setRequestHeader('X-File-Size', String(file.size));
       xhr.upload.onprogress = (event) => setProgress(file.name, event.lengthComputable ? event.loaded * 100 / event.total : 0, `正在上传 ${formatBytes(event.loaded)} / ${formatBytes(file.size)}`);
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) { setProgress(file.name, 100, '上传完成'); toast(`${file.name} 上传完成`); }
@@ -112,11 +116,13 @@
         resolve();
       };
       xhr.onerror = () => { setProgress(file.name, 0, '网络连接中断'); toast('上传失败：网络连接中断'); resolve(); };
+      xhr.onabort = () => { setProgress(file.name, 0, '上传已取消'); toast('上传已取消'); resolve(); };
+      xhr.onloadend = () => { state.xhr = null; elements.cancel.hidden = true; };
       xhr.send(form);
     });
   }
   function connectEvents() {
-    const source = new EventSource('/api/events');
+    const source = state.source = new EventSource('/api/events');
     source.onopen = () => { elements.connection.textContent = '已连接'; elements.connection.className = 'badge online'; };
     source.onerror = () => { elements.connection.textContent = '重连中'; elements.connection.className = 'badge offline'; };
     source.onmessage = async (event) => {
@@ -132,9 +138,13 @@
   elements.drop.addEventListener('click', () => elements.input.click());
   elements.input.addEventListener('change', () => { uploadFiles(elements.input.files); elements.input.value = ''; });
   elements.refresh.addEventListener('click', () => loadFiles().catch(error => toast(error.message)));
+  elements.search.addEventListener('input', () => { state.query = elements.search.value; renderFiles(); });
+  elements.sort.addEventListener('change', () => { state.sort = elements.sort.value; renderFiles(); });
+  elements.cancel.addEventListener('click', () => state.xhr?.abort());
   for (const eventName of ['dragenter', 'dragover']) elements.drop.addEventListener(eventName, event => { event.preventDefault(); elements.drop.classList.add('dragging'); });
   for (const eventName of ['dragleave', 'drop']) elements.drop.addEventListener(eventName, event => { event.preventDefault(); elements.drop.classList.remove('dragging'); });
   elements.drop.addEventListener('drop', event => uploadFiles(event.dataTransfer.files));
   Promise.all([loadSettings(), loadFiles()]).catch(error => toast(error.message));
   connectEvents();
+  window.addEventListener('beforeunload', event => { state.source?.close(); if (state.xhr) { event.preventDefault(); event.returnValue = ''; } });
 })();
