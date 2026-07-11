@@ -2,12 +2,17 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="二维码" Width="390" Height="470" ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner" Background="#F3F7F4">
+        WindowStartupLocation="CenterOwner" Background="#F3F7F4" FontFamily="Microsoft YaHei UI" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Green" Color="#147A4A"/><SolidColorBrush x:Key="GreenDark" Color="#0C5E37"/><SolidColorBrush x:Key="Line" Color="#DCE6DF"/><SolidColorBrush x:Key="Ink" Color="#17231C"/>
+        <Style TargetType="TextBox"><Setter Property="Padding" Value="9,7"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="SelectionBrush" Value="{StaticResource Green}"/><Style.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{StaticResource Green}"/></Trigger></Style.Triggers></Style>
+        <Style TargetType="Button"><Setter Property="Background" Value="{StaticResource Green}"/><Setter Property="Foreground" Value="White"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Border" Property="Background" Value="{StaticResource GreenDark}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+    </Window.Resources>
     <Grid Margin="24">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <TextBlock x:Name="HeadingText" Text="扫码打开" FontSize="21" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,4,0,14"/>
+        <TextBlock x:Name="HeadingText" Text="扫码打开" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Ink}" HorizontalAlignment="Center" Margin="0,4,0,14"/>
         <Border Grid.Row="1" Background="White" BorderBrush="#DCE6DF" BorderThickness="1" CornerRadius="16" Padding="18"><Image x:Name="QrImage" Stretch="Uniform"/></Border>
-        <TextBox x:Name="AddressTextBox" Grid.Row="2" Margin="0,14,0,10" Padding="9" IsReadOnly="True" TextAlignment="Center" BorderBrush="#DCE6DF"/>
-        <Button Grid.Row="3" Content="复制地址" Height="38" Background="#147A4A" Foreground="White" BorderThickness="0" Click="CopyButton_Click"/>
+        <TextBox x:Name="AddressTextBox" Grid.Row="2" Margin="0,14,0,10" IsReadOnly="True" TextAlignment="Center"/>
+        <Button Grid.Row="3" Content="复制地址" Height="38" Click="CopyButton_Click"/>
     </Grid>
 </Window>

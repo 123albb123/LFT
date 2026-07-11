@@ -201,7 +201,7 @@ public partial class MainWindow : Window
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
     {
-        var version = typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "1.1.1";
+        var version = typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "1.2.0";
         MessageBox.Show(this, $"内网文件传输工具\n版本 {version}\nWindows x64 自包含完整绿色版\n\n程序目录：{_paths.BaseDirectory}\n共享目录：{_catalog.DirectoryPath}\n配置目录：{_paths.ConfigDirectory}\n日志目录：{_paths.LogsDirectory}\n端口：{_config.Current.Port}\n状态：{(_server.IsRunning ? "服务运行中" : "服务已停止")}", "关于", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
