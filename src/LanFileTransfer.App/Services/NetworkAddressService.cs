@@ -7,7 +7,7 @@ namespace LanFileTransfer.App.Services;
 
 public sealed class NetworkAddressService
 {
-    private static readonly string[] VirtualKeywords = ["tailscale", "zerotier", "wintun", "wireguard", "tap", "clash", "vmware", "virtualbox", "hyper-v", "vethernet", "docker"];
+    private static readonly string[] VirtualKeywords = ["tailscale", "zerotier", "wintun", "wireguard", "tap", "clash", "vmware", "virtualbox", "hyper-v", "vethernet", "docker", "openvpn", "hamachi", "wsl", "npcap", "loopback adapter", "radmin vpn"];
 
     public sealed record NetworkAddressOption(IPAddress Address, int PrefixLength, string AdapterName, string AdapterDescription, NetworkInterfaceType NetworkInterfaceType, bool IsVirtual, bool IsVpnLike, bool IsRecommended)
     {

@@ -41,4 +41,14 @@ public sealed class NetworkAddressServiceTests
     {
         Assert.Equal(expected, NetworkAddressService.IsPrivateOrLinkLocal(IPAddress.Parse(text)));
     }
+
+    [Theory]
+    [InlineData("OpenVPN TAP", true)]
+    [InlineData("Radmin VPN", true)]
+    [InlineData("Wi-Fi", false)]
+    public void ClassifiesVirtualKeywords(string text, bool expected)
+    {
+        var option = new NetworkAddressService.NetworkAddressOption(IPAddress.Parse("192.168.1.2"), 24, text, text, System.Net.NetworkInformation.NetworkInterfaceType.Ethernet, text.Contains("VPN", StringComparison.OrdinalIgnoreCase) || text.Contains("TAP", StringComparison.OrdinalIgnoreCase), text.Contains("VPN", StringComparison.OrdinalIgnoreCase) || text.Contains("TAP", StringComparison.OrdinalIgnoreCase), false);
+        Assert.Equal(expected, option.IsVirtual || option.IsVpnLike);
+    }
 }

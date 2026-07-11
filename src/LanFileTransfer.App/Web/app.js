@@ -95,7 +95,7 @@
     const frame = document.createElement('iframe'); frame.hidden = true;
     frame.src = `${fileUrl(file.name)}?download=1&transferId=${encodeURIComponent(id)}`;
     const task = { id, fileName: file.name, iframe: frame, status: '运行中', bytes: 0, total: 0, percent: 0, lastActivityAt: Date.now(), watchdog: null };
-    task.watchdog = setTimeout(() => { if (state.downloads.has(id) && task.lastActivityAt === task.startTime) { task.status='未能确认下载状态'; task.iframe.remove(); task.iframe=null; renderDownloads(); } }, 20000);
+    task.watchdog = setTimeout(() => { if (state.downloads.has(id) && task.lastActivityAt === task.startTime) { task.status='浏览器已开始处理下载，暂时无法确认进度'; task.watchdog=null; renderDownloads(); } }, 20000);
     task.startTime = task.lastActivityAt; state.downloads.set(id, task); renderDownloads();
     document.body.append(frame);
   }

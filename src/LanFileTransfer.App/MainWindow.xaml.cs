@@ -515,9 +515,11 @@ public partial class MainWindow : Window
 
     private string GetBaseAddress()
     {
-        var ip = _server.BoundAddress?.ToString() ?? GetDisplayIp();
-        return $"http://{ip}:{_config.Current.Port}";
+        var address = _server.BoundAddress ?? IPAddress.Parse(GetDisplayIp());
+        return $"http://{FormatHost(address)}:{_config.Current.Port}";
     }
+
+    internal static string FormatHost(IPAddress address) => address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? $"[{address}]" : address.ToString();
 
     private string GetWebAddress() => $"{GetBaseAddress()}/web";
 
