@@ -6,7 +6,7 @@
     connection: $('#connectionBadge'), uploadCard: $('#uploadCard'), uploadHint: $('#uploadHint'),
     choose: $('#chooseButton'), input: $('#fileInput'), drop: $('#dropZone'), panel: $('#transferPanel'),
     name: $('#transferName'), percent: $('#transferPercent'), bar: $('#transferBar'), status: $('#transferStatus'),
-    count: $('#fileCount'), total: $('#totalSize'), list: $('#fileList'), empty: $('#emptyState'), refresh: $('#refreshButton'), toast: $('#toast'), search: $('#searchInput'), sort: $('#sortSelect'), cancel: $('#cancelUploadButton')
+    count: $('#fileCount'), total: $('#totalSize'), list: $('#fileList'), empty: $('#emptyState'), refresh: $('#refreshButton'), toast: $('#toast'), search: $('#searchInput'), sort: $('#sortSelect'), cancel: $('#cancelUploadButton'), downloadsCard: $('#downloadsCard'), downloads: $('#downloadList'), reload: $('#reloadButton')
   };
 
   const formatBytes = (value) => {
@@ -31,6 +31,11 @@
     elements.bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
     elements.status.textContent = status;
   }
+  function renderDownloads() {
+    elements.downloads.replaceChildren(); elements.downloadsCard.hidden = state.downloads.size === 0;
+    state.downloads.forEach(task => { const row=document.createElement('article'); row.className='file-row'; const main=document.createElement('div'); main.className='file-main'; const text=document.createElement('div'); text.className='file-copy'; const title=document.createElement('strong'); title.textContent=task.fileName; const meta=document.createElement('p'); meta.className='file-meta'; meta.textContent=`${task.status} · ${task.total ? `${formatBytes(task.bytes)} / ${formatBytes(task.total)} · ${Math.round(task.percent || 0)}%` : '等待服务确认'}`; text.append(title,meta); main.append(text); const actions=document.createElement('div'); actions.className='file-actions'; actions.append(actionButton('清除',()=>clearDownload(task.id))); row.append(main,actions); elements.downloads.append(row); });
+  }
+  function clearDownload(id) { const task=state.downloads.get(id); task?.iframe?.remove(); if(task?.watchdog) clearTimeout(task.watchdog); state.downloads.delete(id); renderDownloads(); }
   async function readError(response) {
     try { return (await response.json()).error || `请求失败（${response.status}）`; }
     catch { return `请求失败（${response.status}）`; }
@@ -86,10 +91,12 @@
     } catch { window.prompt('请复制文件链接：', value); }
   }
   function download(file) {
-    const id = transferId(); setProgress(file.name, 0, '正在下载…');
+    const id = transferId();
     const frame = document.createElement('iframe'); frame.hidden = true;
     frame.src = `${fileUrl(file.name)}?download=1&transferId=${encodeURIComponent(id)}`;
-    state.downloads.set(id, { fileName: file.name, iframe: frame, startTime: Date.now() });
+    const task = { id, fileName: file.name, iframe: frame, status: '运行中', bytes: 0, total: 0, percent: 0, lastActivityAt: Date.now(), watchdog: null };
+    task.watchdog = setTimeout(() => { if (state.downloads.has(id) && task.lastActivityAt === task.startTime) { task.status='未能确认下载状态'; task.iframe.remove(); task.iframe=null; renderDownloads(); } }, 20000);
+    task.startTime = task.lastActivityAt; state.downloads.set(id, task); renderDownloads();
     document.body.append(frame);
   }
   async function removeFile(name) {
@@ -109,7 +116,7 @@
   }
   function uploadOne(file) {
     return new Promise((resolve) => {
-      const id = transferId(); state.currentTransferId = id; const form = new FormData(); form.append('file', file, file.name);
+      const id = transferId(); const form = new FormData(); form.append('file', file, file.name);
       const xhr = new XMLHttpRequest(); state.xhr = xhr; elements.cancel.hidden = false; xhr.open('POST', '/api/files'); xhr.setRequestHeader('X-Lan-Transfer', '1'); xhr.setRequestHeader('X-Transfer-Id', id); xhr.setRequestHeader('X-File-Size', String(file.size));
       xhr.upload.onprogress = (event) => setProgress(file.name, event.lengthComputable ? event.loaded * 100 / event.total : 0, `正在上传 ${formatBytes(event.loaded)} / ${formatBytes(file.size)}`);
       xhr.onload = () => {
@@ -131,8 +138,7 @@
       let message; try { message = JSON.parse(event.data); } catch { return; }
       if (message.type === 'files-changed') { clearTimeout(state.filesRefreshTimer); state.filesRefreshTimer = setTimeout(() => loadFiles().catch(() => {}), 250); }
       if (message.type === 'transfer' && message.data?.direction === 'download' && state.downloads.has(message.data.id)) {
-        const value = message.data; const task = state.downloads.get(value.id); setProgress(value.fileName, value.percent, value.status === 'completed' ? '下载传输完成' : value.status === 'failed' ? value.error : `正在下载 ${formatBytes(value.bytes)} / ${formatBytes(value.total)}`);
-        if (value.status === 'completed' || value.status === 'failed') { task.iframe.remove(); state.downloads.delete(value.id); toast(value.status === 'completed' ? '下载传输完成' : value.error || '下载失败'); }
+        const value = message.data; const task = state.downloads.get(value.id); task.status=value.status === 'completed' ? '完成' : value.status === 'failed' ? (value.error || '失败') : '运行中'; task.bytes=value.bytes || 0; task.total=value.total || 0; task.percent=value.percent || 0; task.lastActivityAt=Date.now(); if(task.watchdog) { clearTimeout(task.watchdog); task.watchdog=null; } if (value.status === 'completed' || value.status === 'failed') { task.iframe?.remove(); task.iframe=null; } renderDownloads();
       }
     };
   }
@@ -147,8 +153,10 @@
   for (const eventName of ['dragleave', 'drop']) elements.drop.addEventListener(eventName, event => { event.preventDefault(); elements.drop.classList.remove('dragging'); });
   elements.drop.addEventListener('drop', event => uploadFiles(event.dataTransfer.files));
   elements.choose.disabled = true; elements.drop.disabled = true;
-  Promise.all([loadSettings(), loadFiles()]).then(() => { elements.choose.disabled = false; elements.drop.disabled = false; }).catch(error => toast(`连接失败：${error.message}`));
+  async function initialize() { elements.choose.disabled = true; elements.drop.disabled = true; let ready=true; try { await loadSettings(); } catch(error) { ready=false; toast(`设置加载失败：${error.message}`); } try { await loadFiles(); } catch(error) { ready=false; toast(`文件列表加载失败：${error.message}`); } if(ready) { elements.choose.disabled=false; elements.drop.disabled=false; } }
+  elements.reload.addEventListener('click', initialize);
+  initialize();
   connectEvents();
   window.addEventListener('beforeunload', event => { if (state.xhr) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', () => { state.source?.close(); state.downloads.forEach(task => task.iframe.remove()); state.downloads.clear(); });
+  window.addEventListener('pagehide', () => { state.source?.close(); clearTimeout(state.filesRefreshTimer); state.downloads.forEach(task => { task.iframe?.remove(); if(task.watchdog) clearTimeout(task.watchdog); }); state.downloads.clear(); });
 })();
