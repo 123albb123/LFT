@@ -130,16 +130,24 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog { Multiselect = true, Title = "选择要共享的文件" };
         if (dialog.ShowDialog(this) == true)
         {
-            if (_activeImportTask is { IsCompleted: false }) { ShowError("正在添加文件", "当前仍有本地文件正在添加，请等待完成或点击“取消添加”。"); return; }
-            _activeImportTask = ImportFilesAsync(dialog.FileNames);
+            TryStartImport(dialog.FileNames);
         }
     }
 
-    private async Task ImportFilesAsync(IEnumerable<string> paths)
+    private void TryStartImport(IEnumerable<string> paths)
+    {
+        var files = paths.Where(File.Exists).ToArray();
+        if (files.Length == 0) return;
+        if (_activeImportTask is { IsCompleted: false }) { ShowError("正在添加文件", "当前仍有本地文件正在添加，请等待完成或点击“取消添加”。"); return; }
+        var cancellation = new CancellationTokenSource();
+        _activeImportCancellation = cancellation;
+        CancelImportButton.Content = "取消添加";
+        _activeImportTask = ImportFilesAsync(files, cancellation);
+    }
+
+    private async Task ImportFilesAsync(IEnumerable<string> paths, CancellationTokenSource cancellation)
     {
         await _importGate.WaitAsync();
-        using var cancellation = new CancellationTokenSource();
-        _activeImportCancellation = cancellation;
         CancelImportButton.IsEnabled = true;
         try
         {
@@ -164,20 +172,31 @@ public partial class MainWindow : Window
         }
         finally
         {
-            if (ReferenceEquals(_activeImportCancellation, cancellation)) _activeImportCancellation = null;
-            CancelImportButton.IsEnabled = false;
+            if (ReferenceEquals(_activeImportCancellation, cancellation))
+            {
+                _activeImportCancellation = null;
+                _activeImportTask = null;
+                CancelImportButton.IsEnabled = false;
+            }
+            cancellation.Dispose();
             _importGate.Release();
             RefreshFiles();
         }
     }
 
-    private void CancelImportButton_Click(object sender, RoutedEventArgs e) => _activeImportCancellation?.Cancel();
+    private void CancelImportButton_Click(object sender, RoutedEventArgs e)
+    {
+        CancelImportButton.IsEnabled = false;
+        CancelImportButton.Content = "正在取消…";
+        _activeImportCancellation?.Cancel();
+    }
 
     private async Task CancelAndWaitForImportAsync()
     {
         _activeImportCancellation?.Cancel();
         var task = _activeImportTask;
         if (task is not null) await task;
+        _catalog.CleanupTemporaryFiles();
     }
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
@@ -337,6 +356,7 @@ public partial class MainWindow : Window
                            !string.Equals(_paths.ResolveUploadDirectory(previous.UploadDirectory), _paths.ResolveUploadDirectory(updated.UploadDirectory), StringComparison.OrdinalIgnoreCase);
         try
         {
+            if (!string.Equals(previous.UploadDirectory, updated.UploadDirectory, StringComparison.OrdinalIgnoreCase) && _activeImportTask is { IsCompleted: false } && MessageBox.Show(this, "当前正在添加文件，切换共享目录会取消添加任务，确定继续吗？", "添加文件进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             if (!string.Equals(previous.UploadDirectory, updated.UploadDirectory, StringComparison.OrdinalIgnoreCase)) await CancelAndWaitForImportAsync();
             if (needsRestart && wasRunning) await _server.StopAsync();
             _config.Replace(updated, persist: false);
@@ -400,7 +420,7 @@ public partial class MainWindow : Window
     {
         if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
         {
-            _ = ImportFilesAsync(paths.Where(File.Exists));
+            TryStartImport(paths);
         }
     }
 
@@ -408,7 +428,7 @@ public partial class MainWindow : Window
     {
         if (_allowClose || _isClosing) return;
         e.Cancel = true;
-        if (_transfers.ActiveCount > 0 && MessageBox.Show(this, $"当前有 {_transfers.ActiveCount} 个传输正在进行。退出会中断传输，确定继续吗？", "传输进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if ((_transfers.ActiveCount > 0 || _activeImportTask is { IsCompleted: false }) && MessageBox.Show(this, "当前仍有文件传输或本地添加任务，退出会中断任务，确定继续吗？", "任务进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _isClosing = true;
         IsEnabled = false;
         await CancelAndWaitForImportAsync();
