@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const $ = (selector) => document.querySelector(selector);
-  const state = { settings: null, files: [], currentTransferId: null, query: '', sort: 'time-desc', xhr: null, source: null };
+  const state = { settings: null, files: [], downloads: new Map(), query: '', sort: 'time-desc', xhr: null, source: null, filesRefreshTimer: null };
   const elements = {
     connection: $('#connectionBadge'), uploadCard: $('#uploadCard'), uploadHint: $('#uploadHint'),
     choose: $('#chooseButton'), input: $('#fileInput'), drop: $('#dropZone'), panel: $('#transferPanel'),
@@ -86,10 +86,11 @@
     } catch { window.prompt('请复制文件链接：', value); }
   }
   function download(file) {
-    const id = transferId(); state.currentTransferId = id; setProgress(file.name, 0, '正在下载…');
+    const id = transferId(); setProgress(file.name, 0, '正在下载…');
     const frame = document.createElement('iframe'); frame.hidden = true;
     frame.src = `${fileUrl(file.name)}?download=1&transferId=${encodeURIComponent(id)}`;
-    document.body.append(frame); setTimeout(() => frame.remove(), 10 * 60 * 1000);
+    state.downloads.set(id, { fileName: file.name, iframe: frame, startTime: Date.now() });
+    document.body.append(frame);
   }
   async function removeFile(name) {
     if (!confirm(`确定删除“${name}”吗？此操作不可撤销。`)) return;
@@ -98,6 +99,7 @@
     toast('文件已删除'); await loadFiles();
   }
   async function uploadFiles(fileList) {
+    if (!state.settings?.allowWebUpload || state.settings.readOnlyMode) { toast('当前不允许上传'); return; }
     const files = Array.from(fileList || []); if (!files.length) return;
     for (const file of files) {
       if (file.size > state.settings.maxUploadBytes) { toast(`${file.name} 超过上传上限`); continue; }
@@ -127,10 +129,10 @@
     source.onerror = () => { elements.connection.textContent = '重连中'; elements.connection.className = 'badge offline'; };
     source.onmessage = async (event) => {
       let message; try { message = JSON.parse(event.data); } catch { return; }
-      if (message.type === 'files-changed') { try { await loadFiles(); } catch {} }
-      if (message.type === 'transfer' && message.data?.id === state.currentTransferId && message.data.direction === 'download') {
-        const value = message.data; setProgress(value.fileName, value.percent, value.status === 'completed' ? '下载传输完成' : value.status === 'failed' ? value.error : `正在下载 ${formatBytes(value.bytes)} / ${formatBytes(value.total)}`);
-        if (value.status === 'completed') toast('下载传输完成');
+      if (message.type === 'files-changed') { clearTimeout(state.filesRefreshTimer); state.filesRefreshTimer = setTimeout(() => loadFiles().catch(() => {}), 250); }
+      if (message.type === 'transfer' && message.data?.direction === 'download' && state.downloads.has(message.data.id)) {
+        const value = message.data; const task = state.downloads.get(value.id); setProgress(value.fileName, value.percent, value.status === 'completed' ? '下载传输完成' : value.status === 'failed' ? value.error : `正在下载 ${formatBytes(value.bytes)} / ${formatBytes(value.total)}`);
+        if (value.status === 'completed' || value.status === 'failed') { task.iframe.remove(); state.downloads.delete(value.id); toast(value.status === 'completed' ? '下载传输完成' : value.error || '下载失败'); }
       }
     };
   }
@@ -144,7 +146,9 @@
   for (const eventName of ['dragenter', 'dragover']) elements.drop.addEventListener(eventName, event => { event.preventDefault(); elements.drop.classList.add('dragging'); });
   for (const eventName of ['dragleave', 'drop']) elements.drop.addEventListener(eventName, event => { event.preventDefault(); elements.drop.classList.remove('dragging'); });
   elements.drop.addEventListener('drop', event => uploadFiles(event.dataTransfer.files));
-  Promise.all([loadSettings(), loadFiles()]).catch(error => toast(error.message));
+  elements.choose.disabled = true; elements.drop.disabled = true;
+  Promise.all([loadSettings(), loadFiles()]).then(() => { elements.choose.disabled = false; elements.drop.disabled = false; }).catch(error => toast(`连接失败：${error.message}`));
   connectEvents();
-  window.addEventListener('beforeunload', event => { state.source?.close(); if (state.xhr) { event.preventDefault(); event.returnValue = ''; } });
+  window.addEventListener('beforeunload', event => { if (state.xhr) { event.preventDefault(); event.returnValue = ''; } });
+  window.addEventListener('pagehide', () => { state.source?.close(); state.downloads.forEach(task => task.iframe.remove()); state.downloads.clear(); });
 })();

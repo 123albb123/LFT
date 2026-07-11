@@ -29,7 +29,9 @@ public partial class MainWindow : Window
     private bool _isClosing;
     private string? _startupNotice;
     private string _fileSearch = string.Empty;
-    private CancellationTokenSource? _importCancellation;
+    private readonly SemaphoreSlim _importGate = new(1, 1);
+    private CancellationTokenSource? _activeImportCancellation;
+    private Task? _activeImportTask;
 
     public MainWindow(AppRuntime runtime)
     {
@@ -128,24 +130,27 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog { Multiselect = true, Title = "选择要共享的文件" };
         if (dialog.ShowDialog(this) == true)
         {
-            _ = ImportFilesAsync(dialog.FileNames);
+            if (_activeImportTask is { IsCompleted: false }) { ShowError("正在添加文件", "当前仍有本地文件正在添加，请等待完成或点击“取消添加”。"); return; }
+            _activeImportTask = ImportFilesAsync(dialog.FileNames);
         }
     }
 
     private async Task ImportFilesAsync(IEnumerable<string> paths)
     {
-        _importCancellation?.Cancel();
-        _importCancellation = new CancellationTokenSource();
+        await _importGate.WaitAsync();
+        using var cancellation = new CancellationTokenSource();
+        _activeImportCancellation = cancellation;
+        CancelImportButton.IsEnabled = true;
         try
         {
             foreach (var path in paths)
             {
                 try
                 {
-                    var item = await _catalog.ImportAsync(path, _importCancellation.Token);
+                    var item = await _catalog.ImportAsync(path, cancellation.Token);
                     _log.Info($"添加 · {item.Name} · 本机 {GetDisplayIp()}");
                 }
-                catch (OperationCanceledException) when (_importCancellation.IsCancellationRequested)
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                 {
                     _log.Info("本地导入已取消。");
                     break;
@@ -159,15 +164,26 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _importCancellation?.Dispose();
-            _importCancellation = null;
+            if (ReferenceEquals(_activeImportCancellation, cancellation)) _activeImportCancellation = null;
+            CancelImportButton.IsEnabled = false;
+            _importGate.Release();
             RefreshFiles();
         }
     }
 
+    private void CancelImportButton_Click(object sender, RoutedEventArgs e) => _activeImportCancellation?.Cancel();
+
+    private async Task CancelAndWaitForImportAsync()
+    {
+        _activeImportCancellation?.Cancel();
+        var task = _activeImportTask;
+        if (task is not null) await task;
+    }
+
     private void AboutButton_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(this, $"内网文件传输工具\n版本 1.1.0\nWindows x64 自包含完整绿色版\n\n程序目录：{_paths.BaseDirectory}\n共享目录：{_catalog.DirectoryPath}\n配置目录：{_paths.ConfigDirectory}\n日志目录：{_paths.LogsDirectory}\n端口：{_config.Current.Port}\n状态：{(_server.IsRunning ? "服务运行中" : "服务已停止")}", "关于", MessageBoxButton.OK, MessageBoxImage.Information);
+        var version = typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "1.1.1";
+        MessageBox.Show(this, $"内网文件传输工具\n版本 {version}\nWindows x64 自包含完整绿色版\n\n程序目录：{_paths.BaseDirectory}\n共享目录：{_catalog.DirectoryPath}\n配置目录：{_paths.ConfigDirectory}\n日志目录：{_paths.LogsDirectory}\n端口：{_config.Current.Port}\n状态：{(_server.IsRunning ? "服务运行中" : "服务已停止")}", "关于", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private async void DeleteFilesButton_Click(object sender, RoutedEventArgs e)
@@ -321,6 +337,7 @@ public partial class MainWindow : Window
                            !string.Equals(_paths.ResolveUploadDirectory(previous.UploadDirectory), _paths.ResolveUploadDirectory(updated.UploadDirectory), StringComparison.OrdinalIgnoreCase);
         try
         {
+            if (!string.Equals(previous.UploadDirectory, updated.UploadDirectory, StringComparison.OrdinalIgnoreCase)) await CancelAndWaitForImportAsync();
             if (needsRestart && wasRunning) await _server.StopAsync();
             _config.Replace(updated, persist: false);
             if (!string.Equals(previous.UploadDirectory, updated.UploadDirectory, StringComparison.OrdinalIgnoreCase)) _catalog.ChangeDirectory(updated.UploadDirectory);
@@ -394,6 +411,7 @@ public partial class MainWindow : Window
         if (_transfers.ActiveCount > 0 && MessageBox.Show(this, $"当前有 {_transfers.ActiveCount} 个传输正在进行。退出会中断传输，确定继续吗？", "传输进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _isClosing = true;
         IsEnabled = false;
+        await CancelAndWaitForImportAsync();
         try { await _server.StopAsync(); }
         catch (Exception exception) { _log.Error("退出时停止服务失败", exception); }
         _catalog.Dispose();

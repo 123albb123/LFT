@@ -162,6 +162,7 @@
                     <WrapPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBox x:Name="FileSearchTextBox" Width="160" Margin="0,0,7,0" ToolTip="按文件名搜索" TextChanged="FileSearchTextBox_TextChanged"/>
                         <Button Content="添加文件" Style="{StaticResource PrimaryButton}" Click="AddFilesButton_Click"/>
+                        <Button x:Name="CancelImportButton" Content="取消添加" IsEnabled="False" Click="CancelImportButton_Click"/>
                         <Button Content="删除选中" Click="DeleteFilesButton_Click"/>
                         <Button Content="打开目录" Margin="0" Click="OpenDirectoryButton_Click"/>
                     </WrapPanel>

@@ -68,7 +68,7 @@ public sealed class HttpFileServer(
             builder.WebHost.ConfigureKestrel(options =>
             {
                 options.AddServerHeader = false;
-                options.Limits.MaxRequestBodySize = settings.MaxUploadBytes + 16L * 1024 * 1024;
+                options.Limits.MaxRequestBodySize = checked(settings.MaxUploadBytes + 16L * 1024 * 1024);
                 options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
                 if (settings.BindingMode == BindingMode.AllInterfaces)
                 {
@@ -248,7 +248,7 @@ public sealed class HttpFileServer(
             return;
         }
 
-        if (context.Request.ContentLength > settings.MaxUploadBytes + 16L * 1024 * 1024)
+        if (context.Request.ContentLength > checked(settings.MaxUploadBytes + 16L * 1024 * 1024))
         {
             context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
             await context.Response.WriteAsJsonAsync(new { error = "上传内容超过最大限制。" });
@@ -431,6 +431,22 @@ public sealed class HttpFileServer(
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsJsonAsync(new { error = exception.Message });
         }
+        catch (UnauthorizedAccessException exception)
+        {
+            log.Error("删除文件被拒绝", exception);
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = "没有删除该文件的权限。" });
+        }
+        catch (IOException exception)
+        {
+            log.Error("删除文件失败", exception);
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(new { error = "文件暂时无法删除，可能正被占用。" });
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            context.Response.StatusCode = 499;
+        }
     }
 
     private async Task HandleEventsAsync(HttpContext context)
@@ -591,6 +607,7 @@ public sealed class HttpFileServer(
 
     private static long GetRequestedLength(HttpContext context, long fullLength)
     {
+        if (fullLength == 0) return 0;
         var range = context.Request.GetTypedHeaders().Range;
         var item = range?.Ranges.Count == 1 ? range.Ranges.First() : null;
         if (item is null) return fullLength;

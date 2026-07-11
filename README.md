@@ -13,7 +13,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/123albb123/LFT/releases) 下载 `内网文件传输工具-win-x64.zip`。
+1. 从 [Releases](https://github.com/123albb123/LFT/releases) 下载 `LFT-win-x64.zip`。
 2. 解压到具有写入权限的普通目录，不要直接在压缩包内运行。
 3. 双击 `内网文件传输工具.exe`。
 4. Windows 防火墙首次询问时，如需其他设备访问，只允许“专用网络”。
@@ -25,7 +25,7 @@
 http://192.168.1.88:28080/xx.conf
 ```
 
-完整操作和故障排查请查看 [使用说明](docs/USER-GUIDE.zh-CN.md)；发布包内的同名文件位于根目录。
+完整操作和故障排查请查看 [使用说明](docs/USER-GUIDE.zh-CN.md)。
 
 ## 默认设置
 
@@ -59,7 +59,7 @@ dotnet test .\LanFileTransfer.sln -c Release
 .\build-package.ps1
 ```
 
-免安装包生成到 `artifacts/内网文件传输工具-win-x64.zip`。
+免安装包生成到 `artifacts/LFT-win-x64.zip`。
 
 ## 安全提示
 

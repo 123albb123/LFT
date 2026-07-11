@@ -32,6 +32,8 @@ public sealed class TransferRegistry(EventHub events)
             return;
         }
 
+        state.LastActivityAt = DateTimeOffset.UtcNow;
+
         var now = Environment.TickCount64;
         if (bytes < state.Total && now - Interlocked.Read(ref state.LastPublishedAt) < 150)
         {
@@ -81,7 +83,7 @@ public sealed class TransferRegistry(EventHub events)
         var threshold = DateTimeOffset.UtcNow - maximumAge;
         foreach (var pair in _active)
         {
-            if (pair.Value.StartedAt < threshold) Fail(pair.Key, "传输超时，已结束。");
+            if (pair.Value.LastActivityAt < threshold) Fail(pair.Key, "传输长时间没有进度，已结束。");
         }
     }
 
@@ -107,5 +109,6 @@ public sealed class TransferRegistry(EventHub events)
         public long Total { get; } = total;
         public long LastPublishedAt;
         public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset LastActivityAt { get; set; } = DateTimeOffset.UtcNow;
     }
 }

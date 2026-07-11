@@ -110,9 +110,9 @@ public sealed class PortableConfigStore
             throw new ArgumentOutOfRangeException(nameof(settings.Port), "端口必须在 1024 到 65535 之间。");
         }
 
-        if (settings.MaxUploadBytes <= 0)
+        if (settings.MaxUploadBytes is <= 0 or > 1_099_511_627_776L)
         {
-            throw new ArgumentOutOfRangeException(nameof(settings.MaxUploadBytes), "最大上传大小必须大于 0。");
+            throw new ArgumentOutOfRangeException(nameof(settings.MaxUploadBytes), "最大上传大小必须在 1 B 到 1 TB 之间。");
         }
 
         var directory = paths.ResolveUploadDirectory(settings.UploadDirectory);
