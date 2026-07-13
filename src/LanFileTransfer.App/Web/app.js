@@ -1,12 +1,12 @@
 (() => {
   'use strict';
   const $ = (selector) => document.querySelector(selector);
-  const state = { settings: null, files: [], downloads: new Map(), query: '', sort: 'time-desc', xhr: null, source: null, filesRefreshTimer: null };
+  const state = { settings: null, files: [], downloads: new Map(), query: '', sort: 'time-desc', xhr: null, source: null, filesRefreshTimer: null, apiReady: false, eventReady: false };
   const elements = {
     connection: $('#connectionBadge'), uploadCard: $('#uploadCard'), uploadHint: $('#uploadHint'),
     choose: $('#chooseButton'), input: $('#fileInput'), drop: $('#dropZone'), panel: $('#transferPanel'),
     name: $('#transferName'), percent: $('#transferPercent'), bar: $('#transferBar'), status: $('#transferStatus'),
-    count: $('#fileCount'), total: $('#totalSize'), list: $('#fileList'), empty: $('#emptyState'), refresh: $('#refreshButton'), toast: $('#toast'), search: $('#searchInput'), sort: $('#sortSelect'), cancel: $('#cancelUploadButton'), downloadsCard: $('#downloadsCard'), downloads: $('#downloadList'), reload: $('#reloadButton')
+    count: $('#fileCount'), total: $('#totalSize'), list: $('#fileList'), empty: $('#emptyState'), refresh: $('#refreshButton'), toast: $('#toast'), search: $('#searchInput'), sort: $('#sortSelect'), cancel: $('#cancelUploadButton'), downloadsCard: $('#downloadsCard'), downloads: $('#downloadList'), reload: $('#reloadButton'), connectionError: $('#connectionError'), connectionErrorText: $('#connectionErrorText')
   };
 
   const formatBytes = (value) => {
@@ -33,9 +33,10 @@
   }
   function renderDownloads() {
     elements.downloads.replaceChildren(); elements.downloadsCard.hidden = state.downloads.size === 0;
-    state.downloads.forEach(task => { const row=document.createElement('article'); row.className='file-row'; const main=document.createElement('div'); main.className='file-main'; const text=document.createElement('div'); text.className='file-copy'; const title=document.createElement('strong'); title.textContent=task.fileName; const meta=document.createElement('p'); meta.className='file-meta'; meta.textContent=`${task.status} · ${task.total ? `${formatBytes(task.bytes)} / ${formatBytes(task.total)} · ${Math.round(task.percent || 0)}%` : '等待服务确认'}`; text.append(title,meta); main.append(text); const actions=document.createElement('div'); actions.className='file-actions'; actions.append(actionButton('清除',()=>clearDownload(task.id))); row.append(main,actions); elements.downloads.append(row); });
+    state.downloads.forEach(task => { const row=document.createElement('article'); row.className='file-row'; const main=document.createElement('div'); main.className='file-main'; const text=document.createElement('div'); text.className='file-copy'; const title=document.createElement('strong'); title.textContent=task.fileName; const meta=document.createElement('p'); meta.className='file-meta'; meta.textContent=`${task.status} · ${task.total ? `${formatBytes(task.bytes)} / ${formatBytes(task.total)} · ${Math.round(task.percent || 0)}%` : '等待服务确认'}`; text.append(title,meta); main.append(text); const actions=document.createElement('div'); actions.className='file-actions'; const active=task.phase === 'running' || task.phase === 'unknown'; actions.append(actionButton(active ? '取消并清除' : '清除',()=>clearDownload(task.id, active))); row.append(main,actions); elements.downloads.append(row); });
   }
-  function clearDownload(id) { const task=state.downloads.get(id); task?.iframe?.remove(); if(task?.watchdog) clearTimeout(task.watchdog); state.downloads.delete(id); renderDownloads(); }
+  function clearDownload(id, confirmActive = false) { const task=state.downloads.get(id); if(confirmActive && !confirm('该下载可能仍在进行，取消并清除任务吗？')) return; task?.iframe?.remove(); if(task?.watchdog) clearTimeout(task.watchdog); if(task?.historyTimer) clearTimeout(task.historyTimer); state.downloads.delete(id); renderDownloads(); }
+  function scheduleDownloadCleanup(task) { if(task.historyTimer) clearTimeout(task.historyTimer); task.historyTimer=setTimeout(()=>clearDownload(task.id), 5 * 60 * 1000); }
   async function readError(response) {
     try { return (await response.json()).error || `请求失败（${response.status}）`; }
     catch { return `请求失败（${response.status}）`; }
@@ -81,21 +82,23 @@
   }
   async function copyLink(name) {
     const value = fileUrl(name);
+    let input;
     try {
       if (navigator.clipboard?.writeText && window.isSecureContext) await navigator.clipboard.writeText(value);
       else {
-        const input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0'; document.body.append(input); input.select();
-        if (!document.execCommand('copy')) throw new Error('copy failed'); input.remove();
+        input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0'; document.body.append(input); input.select();
+        if (!document.execCommand('copy')) throw new Error('copy failed');
       }
       toast('文件链接已复制');
     } catch { window.prompt('请复制文件链接：', value); }
+    finally { input?.remove(); }
   }
   function download(file) {
     const id = transferId();
     const frame = document.createElement('iframe'); frame.hidden = true;
     frame.src = `${fileUrl(file.name)}?download=1&transferId=${encodeURIComponent(id)}`;
-    const task = { id, fileName: file.name, iframe: frame, status: '运行中', bytes: 0, total: 0, percent: 0, lastActivityAt: Date.now(), watchdog: null };
-    task.watchdog = setTimeout(() => { if (state.downloads.has(id) && task.lastActivityAt === task.startTime) { task.status='浏览器已开始处理下载，暂时无法确认进度'; task.watchdog=null; renderDownloads(); } }, 20000);
+    const task = { id, fileName: file.name, iframe: frame, status: '运行中', phase: 'running', bytes: 0, total: 0, percent: 0, lastActivityAt: Date.now(), watchdog: null, historyTimer: null };
+    task.watchdog = setTimeout(() => { if (state.downloads.has(id) && task.lastActivityAt === task.startTime) { task.status='浏览器已开始处理下载，暂时无法确认进度'; task.phase='unknown'; task.watchdog=null; renderDownloads(); } }, 20000);
     task.startTime = task.lastActivityAt; state.downloads.set(id, task); renderDownloads();
     document.body.append(frame);
   }
@@ -131,17 +134,21 @@
     });
   }
   function connectEvents() {
+    state.source?.close();
+    state.eventReady = false;
+    updateConnectionBadge();
     const source = state.source = new EventSource('/api/events');
-    source.onopen = () => { elements.connection.textContent = '已连接'; elements.connection.className = 'badge online'; };
-    source.onerror = () => { elements.connection.textContent = '重连中'; elements.connection.className = 'badge offline'; };
+    source.onopen = () => { state.eventReady = true; updateConnectionBadge(); };
+    source.onerror = () => { state.eventReady = false; updateConnectionBadge(); };
     source.onmessage = async (event) => {
       let message; try { message = JSON.parse(event.data); } catch { return; }
       if (message.type === 'files-changed') { clearTimeout(state.filesRefreshTimer); state.filesRefreshTimer = setTimeout(() => loadFiles().catch(() => {}), 250); }
       if (message.type === 'transfer' && message.data?.direction === 'download' && state.downloads.has(message.data.id)) {
-        const value = message.data; const task = state.downloads.get(value.id); task.status=value.status === 'completed' ? '完成' : value.status === 'failed' ? (value.error || '失败') : '运行中'; task.bytes=value.bytes || 0; task.total=value.total || 0; task.percent=value.percent || 0; task.lastActivityAt=Date.now(); if(task.watchdog) { clearTimeout(task.watchdog); task.watchdog=null; } if (value.status === 'completed' || value.status === 'failed') { task.iframe?.remove(); task.iframe=null; } renderDownloads();
+        const value = message.data; const task = state.downloads.get(value.id); task.phase=value.status; task.status=value.status === 'completed' ? '完成' : value.status === 'failed' ? (value.error || '失败') : '运行中'; task.bytes=value.bytes || 0; task.total=value.total || 0; task.percent=value.percent || 0; task.lastActivityAt=Date.now(); if(task.watchdog) { clearTimeout(task.watchdog); task.watchdog=null; } if (value.status === 'completed' || value.status === 'failed') { task.iframe?.remove(); task.iframe=null; scheduleDownloadCleanup(task); } renderDownloads();
       }
     };
   }
+  function updateConnectionBadge() { const online=state.apiReady && state.eventReady; elements.connection.textContent=online ? '已连接' : state.apiReady ? '重连中' : '连接异常'; elements.connection.className=`badge ${online ? 'online' : 'offline'}`; }
   elements.choose.addEventListener('click', () => elements.input.click());
   elements.drop.addEventListener('click', () => elements.input.click());
   elements.input.addEventListener('change', () => { uploadFiles(elements.input.files); elements.input.value = ''; });
@@ -153,10 +160,11 @@
   for (const eventName of ['dragleave', 'drop']) elements.drop.addEventListener(eventName, event => { event.preventDefault(); elements.drop.classList.remove('dragging'); });
   elements.drop.addEventListener('drop', event => uploadFiles(event.dataTransfer.files));
   elements.choose.disabled = true; elements.drop.disabled = true;
-  async function initialize() { elements.choose.disabled = true; elements.drop.disabled = true; let ready=true; try { await loadSettings(); } catch(error) { ready=false; toast(`设置加载失败：${error.message}`); } try { await loadFiles(); } catch(error) { ready=false; toast(`文件列表加载失败：${error.message}`); } if(ready) { elements.choose.disabled=false; elements.drop.disabled=false; } }
-  elements.reload.addEventListener('click', initialize);
+  async function initialize() { elements.choose.disabled = true; elements.drop.disabled = true; state.apiReady=false; state.settings=null; elements.connectionError.hidden=true; renderFiles(); updateConnectionBadge(); const errors=[]; try { await loadSettings(); } catch(error) { errors.push(`设置加载失败：${error.message}`); } try { await loadFiles(); } catch(error) { errors.push(`文件列表加载失败：${error.message}`); } state.apiReady=errors.length===0; if(state.apiReady) { const uploadAllowed=state.settings?.allowWebUpload && !state.settings.readOnlyMode; elements.choose.disabled=!uploadAllowed; elements.drop.disabled=!uploadAllowed; elements.connectionError.hidden=true; } else { elements.connectionErrorText.textContent=errors.join('；'); elements.connectionError.hidden=false; toast(errors.join('；')); } renderFiles(); updateConnectionBadge(); }
+  async function reconnect() { connectEvents(); await initialize(); }
+  elements.reload.addEventListener('click', reconnect);
   initialize();
   connectEvents();
   window.addEventListener('beforeunload', event => { if (state.xhr) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', () => { state.source?.close(); clearTimeout(state.filesRefreshTimer); state.downloads.forEach(task => { task.iframe?.remove(); if(task.watchdog) clearTimeout(task.watchdog); }); state.downloads.clear(); });
+  window.addEventListener('pagehide', () => { state.source?.close(); state.xhr?.abort(); clearTimeout(state.filesRefreshTimer); clearTimeout(toastTimer); state.downloads.forEach(task => { task.iframe?.remove(); if(task.watchdog) clearTimeout(task.watchdog); if(task.historyTimer) clearTimeout(task.historyTimer); }); state.downloads.clear(); });
 })();

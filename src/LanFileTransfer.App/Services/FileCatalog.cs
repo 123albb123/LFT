@@ -16,6 +16,9 @@ public sealed class FileCatalog : IDisposable
     private Timer? _debounceTimer;
     private Timer? _reconcileTimer;
     private string _directory = string.Empty;
+    private CatalogFileSnapshot[] _lastSnapshot = [];
+    private readonly Dictionary<string, DateTimeOffset> _internalChanges = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _externalLogTimes = new(StringComparer.OrdinalIgnoreCase);
 
     public FileCatalog(AppPaths paths, PortableConfigStore config, EventHub events, AppLogService log)
     {
@@ -86,6 +89,9 @@ public sealed class FileCatalog : IDisposable
             _debounceTimer?.Dispose();
             _reconcileTimer?.Dispose();
             _directory = fullPath;
+            _internalChanges.Clear();
+            _externalLogTimes.Clear();
+            _lastSnapshot = CaptureSnapshot();
 
             _watcher = new FileSystemWatcher(_directory)
             {
@@ -99,14 +105,17 @@ public sealed class FileCatalog : IDisposable
             _watcher.Renamed += OnWatchEvent;
             _watcher.Error += (_, args) => _log.Warning($"文件监视器异常，将依靠定时刷新：{args.GetException().Message}");
             _debounceTimer = new Timer(_ => NotifyChanged(), null, Timeout.Infinite, Timeout.Infinite);
-            _reconcileTimer = new Timer(_ => NotifyChanged(), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+            _reconcileTimer = new Timer(_ => ReconcileDirectory(), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
         }
 
-        NotifyChanged();
+        PublishChanged();
         CleanupTemporaryFiles();
     }
 
-    public async Task<SharedFileItem> ImportAsync(string sourcePath, CancellationToken cancellationToken = default)
+    public async Task<SharedFileItem> ImportAsync(
+        string sourcePath,
+        CancellationToken cancellationToken = default,
+        IProgress<FileCopyProgress>? progress = null)
     {
         if (!File.Exists(sourcePath))
         {
@@ -133,7 +142,17 @@ public sealed class FileCatalog : IDisposable
             await using (var destination = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024,
                              FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
-                await source.CopyToAsync(destination, 1024 * 1024, cancellationToken);
+                var total = source.Length;
+                long copied = 0;
+                progress?.Report(new FileCopyProgress(copied, total));
+                var buffer = new byte[1024 * 1024];
+                int read;
+                while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    copied += read;
+                    progress?.Report(new FileCopyProgress(copied, total));
+                }
                 await destination.FlushAsync(cancellationToken);
             }
 
@@ -185,6 +204,7 @@ public sealed class FileCatalog : IDisposable
                 };
             }
 
+            MarkInternalChange(destination);
             File.Move(temporaryPath, destination, overwrite: behavior == DuplicateBehavior.Overwrite);
             var info = new FileInfo(destination);
             var item = new SharedFileItem(info.Name, info.Length, info.LastWriteTimeUtc);
@@ -203,6 +223,7 @@ public sealed class FileCatalog : IDisposable
         try
         {
             var path = ResolveExisting(name);
+            MarkInternalChange(path);
             File.Delete(path);
             NotifyChanged();
         }
@@ -261,17 +282,98 @@ public sealed class FileCatalog : IDisposable
 
     private void OnWatchEvent(object sender, FileSystemEventArgs args)
     {
-        if (Path.GetFileName(args.FullPath).StartsWith(".upload-", StringComparison.OrdinalIgnoreCase))
+        var fileName = Path.GetFileName(args.FullPath);
+        if (fileName.StartsWith(".upload-", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
+
         lock (_watcherGate)
         {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var expired in _internalChanges.Where(pair => pair.Value <= now).Select(pair => pair.Key).ToArray())
+            {
+                _internalChanges.Remove(expired);
+            }
+
+            var internalChange = _internalChanges.TryGetValue(args.FullPath, out var suppressUntil) && suppressUntil > now;
+            if (!internalChange && (!_externalLogTimes.TryGetValue(args.FullPath, out var lastLogged) || now - lastLogged >= TimeSpan.FromSeconds(1)))
+            {
+                _externalLogTimes[args.FullPath] = now;
+                _log.Info($"文件变化 · {fileName} · 本机");
+            }
             _debounceTimer?.Change(250, Timeout.Infinite);
         }
     }
 
     private void NotifyChanged()
+    {
+        try
+        {
+            var snapshot = CaptureSnapshot();
+            lock (_watcherGate)
+            {
+                _lastSnapshot = snapshot;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log.Warning($"目录变化校准失败：{exception.Message}");
+        }
+
+        PublishChanged();
+    }
+
+    internal bool ReconcileDirectory()
+    {
+        CatalogFileSnapshot[] snapshot;
+        try
+        {
+            snapshot = CaptureSnapshot();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log.Warning($"定时校准共享目录失败：{exception.Message}");
+            return false;
+        }
+
+        var changed = false;
+        lock (_watcherGate)
+        {
+            if (!_lastSnapshot.SequenceEqual(snapshot))
+            {
+                _lastSnapshot = snapshot;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            PublishChanged();
+        }
+        return changed;
+    }
+
+    private CatalogFileSnapshot[] CaptureSnapshot()
+    {
+        return Directory.EnumerateFiles(_directory, "*", SearchOption.TopDirectoryOnly)
+            .Where(path => !Path.GetFileName(path).StartsWith(".upload-", StringComparison.OrdinalIgnoreCase))
+            .Select(path => new FileInfo(path))
+            .Where(info => (info.Attributes & FileAttributes.ReparsePoint) == 0)
+            .Select(info => new CatalogFileSnapshot(info.Name, info.Length, info.LastWriteTimeUtc.Ticks))
+            .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private void MarkInternalChange(string path)
+    {
+        lock (_watcherGate)
+        {
+            _internalChanges[path] = DateTimeOffset.UtcNow.AddSeconds(3);
+        }
+    }
+
+    private void PublishChanged()
     {
         FilesChanged?.Invoke();
         _events.Publish("files-changed", new { at = DateTimeOffset.UtcNow });
@@ -291,7 +393,11 @@ public sealed class FileCatalog : IDisposable
             // 退出或上传失败时尽力清理，后续启动会再次清理。
         }
     }
+
+    private readonly record struct CatalogFileSnapshot(string Name, long Length, long LastWriteTicks);
 }
+
+public readonly record struct FileCopyProgress(long BytesCopied, long TotalBytes);
 
 public sealed class DuplicateFileException(string fileName)
     : IOException($"文件“{fileName}”已存在。")

@@ -142,6 +142,10 @@ public partial class MainWindow : Window
         var cancellation = new CancellationTokenSource();
         _activeImportCancellation = cancellation;
         CancelImportButton.Content = "取消添加";
+        ImportProgressNameText.Text = "正在准备添加文件…";
+        ImportProgressDetailsText.Text = $"共 {files.Length} 个文件";
+        ImportProgressBar.Value = 0;
+        ImportProgressPanel.Visibility = Visibility.Visible;
         _activeImportTask = ImportFilesAsync(files, cancellation);
     }
 
@@ -155,7 +159,17 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    var item = await _catalog.ImportAsync(path, cancellation.Token);
+                    var fileName = Path.GetFileName(path);
+                    ImportProgressNameText.Text = fileName;
+                    ImportProgressDetailsText.Text = "正在读取文件…";
+                    ImportProgressBar.Value = 0;
+                    var progress = new Progress<FileCopyProgress>(value =>
+                    {
+                        var percent = value.TotalBytes == 0 ? 100 : Math.Clamp(value.BytesCopied * 100d / value.TotalBytes, 0, 100);
+                        ImportProgressBar.Value = percent;
+                        ImportProgressDetailsText.Text = $"{FormatSize(value.BytesCopied)} / {FormatSize(value.TotalBytes)} · {percent:0}%";
+                    });
+                    var item = await _catalog.ImportAsync(path, cancellation.Token, progress);
                     _log.Info($"添加 · {item.Name} · 本机 {GetDisplayIp()}");
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -177,6 +191,8 @@ public partial class MainWindow : Window
                 _activeImportCancellation = null;
                 _activeImportTask = null;
                 CancelImportButton.IsEnabled = false;
+                CancelImportButton.Content = "取消添加";
+                ImportProgressPanel.Visibility = Visibility.Collapsed;
             }
             cancellation.Dispose();
             _importGate.Release();
@@ -201,7 +217,7 @@ public partial class MainWindow : Window
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
     {
-        var version = typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "1.2.0";
+        var version = typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "1.2.1";
         MessageBox.Show(this, $"内网文件传输工具\n版本 {version}\nWindows x64 自包含完整绿色版\n\n程序目录：{_paths.BaseDirectory}\n共享目录：{_catalog.DirectoryPath}\n配置目录：{_paths.ConfigDirectory}\n日志目录：{_paths.LogsDirectory}\n端口：{_config.Current.Port}\n状态：{(_server.IsRunning ? "服务运行中" : "服务已停止")}", "关于", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
@@ -232,8 +248,12 @@ public partial class MainWindow : Window
         }
         try
         {
-            Process.Start(new ProcessStartInfo(_catalog.ResolveExisting(file.Name)) { UseShellExecute = true });
-            _log.Info($"编辑 · {file.Name} · 本机 {GetDisplayIp()}");
+            var editor = new ProcessStartInfo("notepad.exe", $"\"{_catalog.ResolveExisting(file.Name)}\"")
+            {
+                UseShellExecute = true
+            };
+            Process.Start(editor);
+            _log.Info($"打开编辑 · {file.Name} · 本机 {GetDisplayIp()}");
         }
         catch (Exception exception) { ShowError("无法打开文件", exception.Message); }
     }
@@ -244,11 +264,6 @@ public partial class MainWindow : Window
     {
         if (FilesGrid.SelectedItem is not SharedFileItem file) return;
         await CopyTextWithFeedbackAsync($"{GetBaseAddress()}/{Uri.EscapeDataString(file.Name)}");
-    }
-
-    private async void CopyAddressButton_Click(object sender, RoutedEventArgs e)
-    {
-        await CopyTextWithFeedbackAsync(GetWebAddress());
     }
 
     private void OpenWebButton_Click(object sender, RoutedEventArgs e)
@@ -405,7 +420,7 @@ public partial class MainWindow : Window
         if (!IsLoaded) return;
         ContextHintText.Visibility = ActualWidth < 980 ? Visibility.Collapsed : Visibility.Visible;
         LanWarningText.Visibility = ActualWidth < 920 ? Visibility.Collapsed : Visibility.Visible;
-        BottomRow.Height = new GridLength(ActualHeight < 690 ? 165 : 176);
+        BottomRow.Height = new GridLength(ActualWidth < 900 ? 205 : ActualHeight < 690 ? 165 : 176);
         SettingsColumn.Width = ActualWidth < 980 ? new GridLength(1, GridUnitType.Star) : new GridLength(0.95, GridUnitType.Star);
         LogColumn.Width = ActualWidth < 980 ? new GridLength(1, GridUnitType.Star) : new GridLength(1.25, GridUnitType.Star);
     }
@@ -456,7 +471,9 @@ public partial class MainWindow : Window
 
     private void RefreshFiles()
     {
-        var selectedName = (FilesGrid.SelectedItem as SharedFileItem)?.Name;
+        var selectedNames = FilesGrid.SelectedItems.Cast<SharedFileItem>()
+            .Select(item => item.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         Files.Clear();
         try
         {
@@ -468,9 +485,9 @@ public partial class MainWindow : Window
             _log.Warning($"共享目录不可访问，暂时无法刷新列表：{exception.Message}");
         }
         FileCountText.Text = $"{Files.Count} 个文件";
-        if (selectedName is not null)
+        foreach (var item in Files.Where(item => selectedNames.Contains(item.Name)))
         {
-            FilesGrid.SelectedItem = Files.FirstOrDefault(item => string.Equals(item.Name, selectedName, StringComparison.OrdinalIgnoreCase));
+            FilesGrid.SelectedItems.Add(item);
         }
     }
 
@@ -519,7 +536,15 @@ public partial class MainWindow : Window
         return $"http://{FormatHost(address)}:{_config.Current.Port}";
     }
 
-    internal static string FormatHost(IPAddress address) => address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? $"[{address}]" : address.ToString();
+    internal static string FormatHost(IPAddress address)
+    {
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            return address.ToString();
+        }
+
+        return $"[{address.ToString().Replace("%", "%25", StringComparison.Ordinal)}]";
+    }
 
     private string GetWebAddress() => $"{GetBaseAddress()}/web";
 
@@ -581,19 +606,38 @@ public partial class MainWindow : Window
             return;
         }
 
+        var previous = _config.Current;
+        var updated = previous with { Port = port.Value };
         try
         {
-            _config.Replace(_config.Current with { Port = port.Value }, persist: true);
-            LoadSettingsIntoUi(_config.Current);
+            _config.Replace(updated, persist: false);
+            LoadSettingsIntoUi(updated);
             UpdateAddress();
-            _log.Info($"端口已改为 {port.Value}，正在重新启动服务。");
-            await StartServerWithFeedbackAsync(allowPortRecovery: false);
+            await _server.StartAsync();
+            if (!_server.IsRunning)
+            {
+                throw new InvalidOperationException($"端口 {port.Value} 启动失败。");
+            }
+            _config.Replace(updated, persist: true);
+            _log.Info($"端口已改为 {port.Value}，服务启动成功。");
         }
         catch (Exception exception)
         {
             _log.Error("自动切换端口失败", exception);
+            try
+            {
+                await _server.StopAsync();
+                _config.Replace(previous, persist: true);
+                LoadSettingsIntoUi(previous);
+                UpdateAddress();
+            }
+            catch (Exception rollbackException)
+            {
+                _log.Error("恢复原端口失败", rollbackException);
+            }
             ShowError("切换端口失败", exception.Message);
         }
+        UpdateServiceUi();
     }
 
     private static int? FindAvailableHighPort()
@@ -602,8 +646,12 @@ public partial class MainWindow : Window
         {
             try
             {
-                using var listener = new TcpListener(IPAddress.Loopback, port);
-                listener.Start();
+                using var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp)
+                {
+                    DualMode = true,
+                    ExclusiveAddressUse = true
+                };
+                socket.Bind(new IPEndPoint(IPAddress.IPv6Any, port));
                 return port;
             }
             catch (SocketException)
@@ -615,4 +663,12 @@ public partial class MainWindow : Window
 
     private static bool IsEditableTextFile(string name) => Path.GetExtension(name).ToLowerInvariant() is
         ".txt" or ".conf" or ".config" or ".json" or ".xml" or ".csv" or ".log" or ".md" or ".ini" or ".yaml" or ".yml" or ".properties";
+
+    private static string FormatSize(long size) => size switch
+    {
+        >= 1024L * 1024 * 1024 => $"{size / (1024d * 1024 * 1024):0.##} GB",
+        >= 1024L * 1024 => $"{size / (1024d * 1024):0.##} MB",
+        >= 1024 => $"{size / 1024d:0.##} KB",
+        _ => $"{size} B"
+    };
 }

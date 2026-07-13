@@ -4,6 +4,7 @@ using System.Net;
 using System.Text.Json;
 using LanFileTransfer.App.Infrastructure;
 using LanFileTransfer.App.Models;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -155,6 +156,22 @@ public sealed class HttpFileServer(
 
     private void ConfigurePipeline(WebApplication app)
     {
+        app.UseExceptionHandler(handler => handler.Run(async context =>
+        {
+            var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+            var clientIp = GetClientIp(context);
+            var exceptionSummary = exception?.GetType().Name ?? "未知异常";
+            log.Error($"HTTP {context.Request.Method} {context.Request.Path} · {clientIp} · {exceptionSummary}", exception);
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/problem+json";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                type = "about:blank",
+                title = "服务器处理请求时发生错误",
+                status = 500
+            });
+        }));
+
         app.Use(async (context, next) =>
         {
             if (config.Current.LanOnly && !network.IsLocalNetworkClient(context.Connection.RemoteIpAddress))
@@ -168,18 +185,6 @@ public sealed class HttpFileServer(
             context.Response.Headers["Referrer-Policy"] = "no-referrer";
             await next();
         });
-
-        app.UseExceptionHandler(handler => handler.Run(async context =>
-        {
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            context.Response.ContentType = "application/problem+json";
-            await context.Response.WriteAsJsonAsync(new
-            {
-                type = "about:blank",
-                title = "服务器处理请求时发生错误",
-                status = 500
-            });
-        }));
 
         app.MapGet("/", () => Results.Redirect("/web"));
         app.MapGet("/web", (HttpContext context) =>
@@ -489,6 +494,10 @@ public sealed class HttpFileServer(
 
     private async Task HandleFileAsync(HttpContext context, string fileName)
     {
+        var transferId = context.Request.Query["transferId"].ToString();
+        var trackedDownloadRequested = context.Request.Method == HttpMethods.Get &&
+                                       context.Request.Query["download"] == "1" &&
+                                       !string.IsNullOrWhiteSpace(transferId);
         string path;
         try
         {
@@ -496,11 +505,13 @@ public sealed class HttpFileServer(
         }
         catch (FileNotFoundException)
         {
+            if (trackedDownloadRequested) PublishPendingDownloadFailure(transferId, fileName, "文件不存在或已删除。");
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
         catch (Exception exception) when (exception is InvalidDataException or UnauthorizedAccessException)
         {
+            if (trackedDownloadRequested) PublishPendingDownloadFailure(transferId, fileName, "文件名无效或访问被拒绝。");
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
@@ -508,10 +519,14 @@ public sealed class HttpFileServer(
         var info = new FileInfo(path);
         var (contentType, canPreview) = SafeContentTypes.Get(info.Name);
         var forceDownload = context.Request.Query["download"] == "1" || !canPreview;
-        var transferId = context.Request.Query["transferId"].ToString();
-        var transferLength = GetRequestedLength(context, info.Length);
-        var tracked = context.Request.Method == HttpMethods.Get && forceDownload &&
-                      !string.IsNullOrWhiteSpace(transferId) &&
+        if (!TryGetRequestedLength(context, info.Length, out var transferLength))
+        {
+            if (trackedDownloadRequested) PublishPendingDownloadFailure(transferId, info.Name, "请求的文件范围无效。");
+            context.Response.StatusCode = StatusCodes.Status416RangeNotSatisfiable;
+            context.Response.Headers.ContentRange = $"bytes */{info.Length}";
+            return;
+        }
+        var tracked = trackedDownloadRequested && forceDownload &&
                       transfers.Begin(transferId, "download", info.Name, transferLength);
 
         context.Response.Headers.CacheControl = "no-cache";
@@ -605,19 +620,54 @@ public sealed class HttpFileServer(
         return errorCode is 0x27 or 0x70;
     }
 
-    private static long GetRequestedLength(HttpContext context, long fullLength)
+    private static bool TryGetRequestedLength(HttpContext context, long fullLength, out long requestedLength)
     {
-        if (fullLength == 0) return 0;
         var range = context.Request.GetTypedHeaders().Range;
-        var item = range?.Ranges.Count == 1 ? range.Ranges.First() : null;
-        if (item is null) return fullLength;
+        if (range is null)
+        {
+            requestedLength = fullLength;
+            return true;
+        }
+
+        if (fullLength == 0 || range.Ranges.Count != 1)
+        {
+            requestedLength = 0;
+            return false;
+        }
+
+        var item = range.Ranges.First();
 
         var from = item.From;
         var to = item.To;
-        if (from is null && to is { } suffix) return Math.Min(suffix, fullLength);
-        var start = Math.Clamp(from ?? 0, 0, fullLength);
-        var end = Math.Clamp(to ?? fullLength - 1, start, fullLength - 1);
-        return Math.Max(0, end - start + 1);
+        if (from is null)
+        {
+            if (to is not { } suffix || suffix <= 0)
+            {
+                requestedLength = 0;
+                return false;
+            }
+
+            requestedLength = Math.Min(suffix, fullLength);
+            return true;
+        }
+
+        if (from < 0 || from >= fullLength || (to is not null && to < from))
+        {
+            requestedLength = 0;
+            return false;
+        }
+
+        var end = Math.Min(to ?? fullLength - 1, fullLength - 1);
+        requestedLength = end - from.Value + 1;
+        return true;
+    }
+
+    private void PublishPendingDownloadFailure(string transferId, string fileName, string error)
+    {
+        if (transfers.Begin(transferId, "download", fileName, 0))
+        {
+            transfers.Fail(transferId, error);
+        }
     }
 
     private static string GetClientIp(HttpContext context)

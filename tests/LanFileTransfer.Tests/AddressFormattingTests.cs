@@ -12,4 +12,10 @@ public sealed class AddressFormattingTests
     [InlineData("fd00::1234")]
     [InlineData("fe80::1234")]
     public void FormatsIpv6WithBrackets(string address) => Assert.Equal($"[{address}]", MainWindow.FormatHost(IPAddress.Parse(address)));
+
+    [Fact]
+    public void EncodesIpv6ScopeIdForBrowserUrls()
+    {
+        Assert.Equal("[fe80::1234%2512]", MainWindow.FormatHost(IPAddress.Parse("fe80::1234%12")));
+    }
 }

@@ -10,6 +10,9 @@ public sealed class NetworkAddressServiceTests
     [InlineData("172.16.5.4", true)]
     [InlineData("172.31.255.1", true)]
     [InlineData("192.168.88.12", true)]
+    [InlineData("100.64.0.1", true)]
+    [InlineData("100.127.255.254", true)]
+    [InlineData("100.128.0.1", false)]
     [InlineData("169.254.1.2", true)]
     [InlineData("8.8.8.8", false)]
     [InlineData("172.32.0.1", false)]
@@ -48,7 +51,6 @@ public sealed class NetworkAddressServiceTests
     [InlineData("Wi-Fi", false)]
     public void ClassifiesVirtualKeywords(string text, bool expected)
     {
-        var option = new NetworkAddressService.NetworkAddressOption(IPAddress.Parse("192.168.1.2"), 24, text, text, System.Net.NetworkInformation.NetworkInterfaceType.Ethernet, text.Contains("VPN", StringComparison.OrdinalIgnoreCase) || text.Contains("TAP", StringComparison.OrdinalIgnoreCase), text.Contains("VPN", StringComparison.OrdinalIgnoreCase) || text.Contains("TAP", StringComparison.OrdinalIgnoreCase), false);
-        Assert.Equal(expected, option.IsVirtual || option.IsVpnLike);
+        Assert.Equal(expected, NetworkAddressService.IsVirtualOrVpn(text, text));
     }
 }

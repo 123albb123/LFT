@@ -108,6 +108,19 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="GreenProgress" TargetType="ProgressBar">
+            <Setter Property="Height" Value="7"/><Setter Property="Background" Value="#DCE5DE"/><Setter Property="Foreground" Value="{StaticResource Green}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Grid x:Name="PART_Track" ClipToBounds="True">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="4"/>
+                            <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Background="{TemplateBinding Foreground}" CornerRadius="4"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <Style x:Key="FileColumnHeader" TargetType="DataGridColumnHeader">
             <Setter Property="Height" Value="38"/>
@@ -184,7 +197,7 @@
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="180"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="84"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="访问地址" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,9,0"/>
-                <ComboBox x:Name="IpAddressCombo" Grid.Column="1" SelectionChanged="IpAddressCombo_SelectionChanged"/>
+                <ComboBox x:Name="IpAddressCombo" Grid.Column="1" SelectionChanged="IpAddressCombo_SelectionChanged" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}"/>
                 <TextBlock Grid.Column="2" Text="端口" FontWeight="SemiBold" VerticalAlignment="Center" Margin="15,0,7,0"/>
                 <TextBox x:Name="PortTextBox" Grid.Column="3" Text="28080"/>
                 <TextBox x:Name="AddressTextBox" Grid.Column="4" Margin="13,0,0,0" IsReadOnly="True" Background="#F6F8F6"/>
@@ -202,7 +215,7 @@
 
         <Border Grid.Row="2" Style="{StaticResource Card}" Padding="0">
             <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="50"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="50"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <Grid Margin="16,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -211,14 +224,32 @@
                         <TextBlock x:Name="ContextHintText" Text="· 右键文件可进行更多操作" Foreground="#829087" Margin="8,3,0,0"/>
                     </StackPanel>
                     <WrapPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBox x:Name="FileSearchTextBox" Width="160" Margin="0,0,7,0" ToolTip="按文件名搜索" TextChanged="FileSearchTextBox_TextChanged"/>
+                        <Grid Width="160" Margin="0,0,7,0">
+                            <TextBox x:Name="FileSearchTextBox" ToolTip="按文件名搜索" TextChanged="FileSearchTextBox_TextChanged"/>
+                            <TextBlock Text="搜索文件" Foreground="#8A958E" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=FileSearchTextBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
                         <Button Content="添加文件" Style="{StaticResource PrimaryButton}" Click="AddFilesButton_Click"/>
                         <Button x:Name="CancelImportButton" Content="取消添加" IsEnabled="False" Click="CancelImportButton_Click"/>
-                        <Button Content="删除选中" Click="DeleteFilesButton_Click"/>
                         <Button Content="打开目录" Margin="0" Click="OpenDirectoryButton_Click"/>
                     </WrapPanel>
                 </Grid>
-                <DataGrid x:Name="FilesGrid" Grid.Row="1" ItemsSource="{Binding Files}" AutoGenerateColumns="False"
+                <Border x:Name="ImportProgressPanel" Grid.Row="1" Margin="16,0,16,9" Padding="12,9" Background="#F3F8F4" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="9" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ImportProgressNameText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="ImportProgressDetailsText" Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource Muted}"/>
+                        <ProgressBar x:Name="ImportProgressBar" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,7,0,0" Minimum="0" Maximum="100" Style="{StaticResource GreenProgress}"/>
+                    </Grid>
+                </Border>
+                <DataGrid x:Name="FilesGrid" Grid.Row="2" ItemsSource="{Binding Files}" AutoGenerateColumns="False"
                           SelectionMode="Extended" SelectionUnit="FullRow" IsReadOnly="True" BorderThickness="0"
                           CanUserResizeColumns="True" CanUserSortColumns="True" HeadersVisibility="Column"
                           EnableRowVirtualization="True" EnableColumnVirtualization="True" GridLinesVisibility="None"

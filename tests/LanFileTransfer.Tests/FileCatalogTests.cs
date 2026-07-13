@@ -99,4 +99,41 @@ public sealed class FileCatalogTests
         var item = await catalog.CommitTemporaryAsync(temporary, "web", DuplicateBehavior.AutoRename);
         Assert.Equal("共享-web", item.Name);
     }
+
+    [Fact]
+    public async Task ImportReportsCopiedBytesAndTotalSize()
+    {
+        using var temp = new TempDirectory();
+        var paths = new AppPaths(temp.Path);
+        var config = new PortableConfigStore(paths); config.Load();
+        using var catalog = new FileCatalog(paths, config, new EventHub(), new AppLogService(paths));
+        var source = Path.Combine(temp.Path, "progress.bin");
+        await File.WriteAllBytesAsync(source, new byte[1024 * 1024 + 17]);
+        var updates = new List<FileCopyProgress>();
+
+        await catalog.ImportAsync(source, progress: new InlineProgress<FileCopyProgress>(updates.Add));
+
+        Assert.NotEmpty(updates);
+        Assert.Equal(new FileInfo(source).Length, updates[^1].BytesCopied);
+        Assert.Equal(new FileInfo(source).Length, updates[^1].TotalBytes);
+    }
+
+    [Fact]
+    public void ReconcilePublishesOnlyWhenDirectorySnapshotChanges()
+    {
+        using var temp = new TempDirectory();
+        var paths = new AppPaths(temp.Path);
+        var config = new PortableConfigStore(paths); config.Load();
+        using var catalog = new FileCatalog(paths, config, new EventHub(), new AppLogService(paths));
+
+        Assert.False(catalog.ReconcileDirectory());
+        File.WriteAllText(Path.Combine(catalog.DirectoryPath, "external.txt"), "changed");
+        Assert.True(catalog.ReconcileDirectory());
+        Assert.False(catalog.ReconcileDirectory());
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 }

@@ -18,8 +18,7 @@ public sealed class NetworkAddressService
     {
         return GetPrivateUnicastNetworks().Select(item =>
         {
-            var text = item.AdapterName + " " + item.AdapterDescription;
-            var virtualLike = VirtualKeywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+            var virtualLike = IsVirtualOrVpn(item.AdapterName, item.AdapterDescription);
             var preferredType = item.Type is NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.Ethernet;
             return new NetworkAddressOption(item.Address, item.PrefixLength, item.AdapterName, item.AdapterDescription, item.Type, virtualLike, virtualLike, preferredType && !virtualLike);
         }).OrderBy(option => option.IsRecommended ? 0 : 1).ThenBy(option => AddressRank(option.Address)).ThenBy(option => option.AdapterName).ToArray();
@@ -107,6 +106,7 @@ public sealed class NetworkAddressService
             return bytes[0] == 10 ||
                    (bytes[0] == 172 && bytes[1] is >= 16 and <= 31) ||
                    (bytes[0] == 192 && bytes[1] == 168) ||
+                   (bytes[0] == 100 && bytes[1] is >= 64 and <= 127) ||
                    (bytes[0] == 169 && bytes[1] == 254);
         }
 
@@ -117,6 +117,12 @@ public sealed class NetworkAddressService
         }
 
         return false;
+    }
+
+    internal static bool IsVirtualOrVpn(string adapterName, string adapterDescription)
+    {
+        var text = adapterName + " " + adapterDescription;
+        return VirtualKeywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyList<NetworkPrefix> GetPrivateUnicastNetworks()

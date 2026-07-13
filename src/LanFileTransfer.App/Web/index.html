@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f8a55'/%3E%3Cpath d='M18 18h20l8 8v20H18z' fill='white'/%3E%3Cpath d='M38 18v10h8M25 37h14M32 30v14' fill='none' stroke='%230f8a55' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
   <title>内网文件传输工具</title>
   <link rel="stylesheet" href="/assets/app.css">
 </head>
@@ -16,6 +17,11 @@
       </div>
       <span id="connectionBadge" class="badge online">已连接</span>
     </header>
+
+    <section id="connectionError" class="connection-error" hidden>
+      <span id="connectionErrorText">连接服务失败。</span>
+      <button id="reloadButton" class="button ghost" type="button">重新连接</button>
+    </section>
 
     <section id="uploadCard" class="card upload-card">
       <div class="section-title">
@@ -45,7 +51,7 @@
       </div>
       <div id="fileList" class="file-list" aria-live="polite"></div>
     </section>
-    <section id="downloadsCard" class="card" hidden><div class="section-title"><div><h2>下载任务</h2><p>任务完成或失败后可手动清除</p></div><button id="reloadButton" class="button ghost" type="button">重新连接</button></div><div id="downloadList" class="file-list"></div></section>
+    <section id="downloadsCard" class="card" hidden><div class="section-title"><div><h2>下载任务</h2><p>运行中任务可取消；完成记录将在 5 分钟后自动清理</p></div></div><div id="downloadList" class="file-list"></div></section>
 
     <footer>仅供当前局域网使用 · 请勿分享敏感文件</footer>
   </main>

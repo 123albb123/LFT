@@ -168,6 +168,59 @@ public sealed class HttpFileServerTests
         Assert.Equal(HttpStatusCode.Forbidden, (await environment.Client.SendAsync(delete)).StatusCode);
     }
 
+    [Fact]
+    public async Task UnsatisfiableAndZeroLengthRangesReturn416WithoutServerError()
+    {
+        await using var environment = await ServerEnvironment.StartAsync(maxUploadBytes: 1024);
+        await File.WriteAllTextAsync(Path.Combine(environment.Catalog.DirectoryPath, "range.txt"), "abc");
+        await File.WriteAllBytesAsync(Path.Combine(environment.Catalog.DirectoryPath, "zero.txt"), []);
+
+        using var beyondEnd = new HttpRequestMessage(HttpMethod.Get, "/range.txt");
+        beyondEnd.Headers.Range = new RangeHeaderValue(999, null);
+        var beyondEndResponse = await environment.Client.SendAsync(beyondEnd);
+        Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, beyondEndResponse.StatusCode);
+        Assert.Equal("bytes */3", beyondEndResponse.Content.Headers.ContentRange?.ToString());
+
+        var zeroResponse = await environment.Client.GetAsync("/zero.txt");
+        Assert.Equal(HttpStatusCode.OK, zeroResponse.StatusCode);
+        Assert.Equal(0, zeroResponse.Content.Headers.ContentLength);
+
+        using var zeroHead = new HttpRequestMessage(HttpMethod.Head, "/zero.txt");
+        var zeroHeadResponse = await environment.Client.SendAsync(zeroHead);
+        Assert.Equal(HttpStatusCode.OK, zeroHeadResponse.StatusCode);
+        Assert.Equal(0, zeroHeadResponse.Content.Headers.ContentLength);
+
+        using var zeroRange = new HttpRequestMessage(HttpMethod.Get, "/zero.txt");
+        zeroRange.Headers.Range = new RangeHeaderValue(0, 0);
+        var zeroRangeResponse = await environment.Client.SendAsync(zeroRange);
+        Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, zeroRangeResponse.StatusCode);
+        Assert.Equal("bytes */0", zeroRangeResponse.Content.Headers.ContentRange?.ToString());
+    }
+
+    [Fact]
+    public async Task MissingTrackedDownloadPublishesIndependentFailedState()
+    {
+        await using var environment = await ServerEnvironment.StartAsync(maxUploadBytes: 1024);
+        using var subscription = environment.Events.Subscribe();
+
+        var response = await environment.Client.GetAsync("/missing.txt?download=1&transferId=missing-download");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (await subscription.Reader.WaitToReadAsync(timeout.Token))
+        {
+            var message = JsonDocument.Parse(await subscription.Reader.ReadAsync(timeout.Token)).RootElement;
+            if (message.GetProperty("type").GetString() != "transfer") continue;
+            var data = message.GetProperty("data");
+            if (data.GetProperty("id").GetString() != "missing-download" || data.GetProperty("status").GetString() != "failed") continue;
+            Assert.Equal("download", data.GetProperty("direction").GetString());
+            Assert.Contains("不存在", data.GetProperty("error").GetString());
+            return;
+        }
+
+        Assert.Fail("未收到缺失文件下载失败事件。");
+    }
+
     private static int GetFreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -179,11 +232,12 @@ public sealed class HttpFileServerTests
     {
         private readonly TempDirectory _temp;
         private readonly HttpFileServer _server;
-        private ServerEnvironment(TempDirectory temp, HttpFileServer server, FileCatalog catalog, HttpClient client)
+        private ServerEnvironment(TempDirectory temp, HttpFileServer server, FileCatalog catalog, EventHub events, HttpClient client)
         {
-            _temp = temp; _server = server; Catalog = catalog; Client = client;
+            _temp = temp; _server = server; Catalog = catalog; Events = events; Client = client;
         }
         public FileCatalog Catalog { get; }
+        public EventHub Events { get; }
         public HttpClient Client { get; }
         public static async Task<ServerEnvironment> StartAsync(long maxUploadBytes, bool readOnlyMode = false)
         {
@@ -194,7 +248,7 @@ public sealed class HttpFileServerTests
             var catalog = new FileCatalog(paths, config, events, log);
             var server = new HttpFileServer(config, catalog, new NetworkAddressService(), events, transfers, new WebAssetProvider(), log);
             await server.StartAsync();
-            return new ServerEnvironment(temp, server, catalog, new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") });
+            return new ServerEnvironment(temp, server, catalog, events, new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") });
         }
         public async ValueTask DisposeAsync()
         {
