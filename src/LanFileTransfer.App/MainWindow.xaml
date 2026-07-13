@@ -317,7 +317,7 @@
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <Grid Margin="14,0"><TextBlock Text="运行日志" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/><WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center"><Button Content="复制" Padding="10,5" MinHeight="30" Click="CopyLogsButton_Click"/><Button Content="清空显示" Padding="10,5" MinHeight="30" Click="ClearLogDisplayButton_Click"/><Button Content="打开日志目录" Margin="0" Padding="10,5" MinHeight="30" Click="OpenLogsButton_Click"/></WrapPanel></Grid>
-                    <TextBox x:Name="LogTextBox" Grid.Row="1" Margin="10,0,10,10" IsReadOnly="True" TextWrapping="NoWrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas, Microsoft YaHei UI" FontSize="11.5" Background="#F8FAF8"/>
+                    <TextBox x:Name="LogTextBox" Grid.Row="1" Margin="10,0,10,10" Padding="10,8" IsReadOnly="True" TextWrapping="NoWrap" AcceptsReturn="True" VerticalContentAlignment="Top" HorizontalContentAlignment="Left" TextAlignment="Left" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas, Microsoft YaHei UI" FontSize="11.5" Background="#F8FAF8"/>
                 </Grid>
             </Border>
         </Grid>

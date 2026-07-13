@@ -42,7 +42,7 @@ Set-Content -LiteralPath (Join-Path $publish "README.md") -Value $releaseReadme 
 Copy-Item -LiteralPath (Join-Path $root "docs\USER-GUIDE.zh-CN.md") -Destination (Join-Path $publish "USER-GUIDE.zh-CN.md")
 Copy-Item -LiteralPath (Join-Path $root "CHANGELOG.md") -Destination (Join-Path $publish "CHANGELOG.md")
 $buildTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss K"
-@("软件名称：内网文件传输工具", "版本：1.2.1", "构建时间：$buildTime", "平台：Windows x64", "发布类型：自包含完整绿色版", "默认端口：28080") | Set-Content -LiteralPath (Join-Path $publish "VERSION.txt") -Encoding utf8
+@("软件名称：内网文件传输工具", "版本：1.2.2", "构建时间：$buildTime", "平台：Windows x64", "发布类型：自包含完整绿色版", "默认端口：28080") | Set-Content -LiteralPath (Join-Path $publish "VERSION.txt") -Encoding utf8
 $checksums = Get-ChildItem -LiteralPath $publish -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLowerInvariant())  $(Split-Path -Leaf $_.Path)" }
 $checksums | Set-Content -LiteralPath (Join-Path $publish "SHA256SUMS.txt") -Encoding utf8
 if ((Get-ChildItem -LiteralPath $publish -Filter *.exe).Name -ne "内网文件传输工具.exe") { throw "发布目录只能包含中文 EXE：内网文件传输工具.exe" }

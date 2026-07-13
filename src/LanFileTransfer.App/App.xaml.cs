@@ -59,7 +59,7 @@ public partial class App : Application
     {
         _log?.Error("界面发生未处理异常", e.Exception);
         e.Handled = true;
-        MessageBox.Show("程序发生未处理错误，将安全退出。请查看 Logs 目录中的日志。", "内网文件传输工具", MessageBoxButton.OK, MessageBoxImage.Error);
+        ThemeDialog.Show(MainWindow, "程序发生未处理错误，将安全退出。请查看 Logs 目录中的日志。", "内网文件传输工具", MessageBoxButton.OK, MessageBoxImage.Error);
         Shutdown(-1);
     }
 
@@ -80,7 +80,7 @@ public partial class App : Application
     private static void ShowStartupFailure(Exception exception)
     {
         var message = "当前程序目录无法保存配置、日志或共享文件。请先完整解压软件，并移动到桌面、下载目录或其他普通可写磁盘目录后重新运行。\n\n" + exception.Message;
-        if (MessageBox.Show(message, "无法启动内网文件传输工具", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+        if (ThemeDialog.Show(null, message, "无法启动内网文件传输工具", MessageBoxButton.YesNo, MessageBoxImage.Warning, "打开程序目录", "关闭") == MessageBoxResult.Yes)
         {
             try { Process.Start(new ProcessStartInfo(AppContext.BaseDirectory) { UseShellExecute = true }); } catch { }
         }

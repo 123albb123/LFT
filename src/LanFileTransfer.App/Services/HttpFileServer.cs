@@ -26,6 +26,7 @@ public sealed class HttpFileServer(
     WebAssetProvider webAssets,
     AppLogService log)
 {
+    internal static readonly TimeSpan TransferInactivityTimeout = TimeSpan.FromMinutes(30);
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private WebApplication? _application;
     private Timer? _transferCleanupTimer;
@@ -100,7 +101,7 @@ public sealed class HttpFileServer(
             _application = app;
             BoundAddress = boundAddress;
             _transferCleanupTimer = new Timer(
-                _ => transfers.CleanupExpired(TimeSpan.FromHours(2)),
+                _ => transfers.CleanupExpired(TransferInactivityTimeout),
                 null,
                 TimeSpan.FromMinutes(5),
                 TimeSpan.FromMinutes(5));

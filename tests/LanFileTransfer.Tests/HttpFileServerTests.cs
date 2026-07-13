@@ -12,6 +12,12 @@ namespace LanFileTransfer.Tests;
 public sealed class HttpFileServerTests
 {
     [Fact]
+    public void UsesThirtyMinuteTransferInactivityTimeout()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(30), HttpFileServer.TransferInactivityTimeout);
+    }
+
+    [Fact]
     public async Task ServesWebUploadsUnicodeFilesRangesAndReleasesPort()
     {
         using var temp = new TempDirectory();

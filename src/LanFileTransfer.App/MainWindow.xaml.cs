@@ -79,7 +79,7 @@ public partial class MainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(_startupNotice))
         {
-            MessageBox.Show(this, _startupNotice, "配置已恢复", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ThemeDialog.Show(this, _startupNotice, "配置已恢复", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         await StartServerWithFeedbackAsync();
@@ -217,15 +217,24 @@ public partial class MainWindow : Window
 
     private void AboutButton_Click(object sender, RoutedEventArgs e)
     {
-        var version = typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "1.2.1";
-        MessageBox.Show(this, $"内网文件传输工具\n版本 {version}\nWindows x64 自包含完整绿色版\n\n程序目录：{_paths.BaseDirectory}\n共享目录：{_catalog.DirectoryPath}\n配置目录：{_paths.ConfigDirectory}\n日志目录：{_paths.LogsDirectory}\n端口：{_config.Current.Port}\n状态：{(_server.IsRunning ? "服务运行中" : "服务已停止")}", "关于", MessageBoxButton.OK, MessageBoxImage.Information);
+        var assembly = typeof(MainWindow).Assembly;
+        var version = assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false).OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? assembly.GetName().Version?.ToString(3) ?? "未知";
+        var processPath = Environment.ProcessPath;
+        var buildTime = processPath is not null && File.Exists(processPath) ? File.GetLastWriteTime(processPath).ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture) : "未知";
+        var bindingMode = _config.Current.BindingMode switch { BindingMode.Specific => "指定 IP", BindingMode.AllInterfaces => "所有网卡", _ => "自动推荐" };
+        var actualBinding = !_server.IsRunning
+            ? "未监听"
+            : _config.Current.BindingMode == BindingMode.AllInterfaces
+                ? "全部可用 IPv4/IPv6 网卡"
+                : FormatHost(_server.BoundAddress ?? IPAddress.Loopback);
+        ThemeDialog.Show(this, $"内网文件传输工具\n版本：{version}\n构建时间：{buildTime}\n发布类型：Windows x64 自包含完整绿色版\n\n状态：{(_server.IsRunning ? "服务运行中" : "服务已停止")}\n绑定模式：{bindingMode}\n实际监听：{actualBinding}\n端口：{_config.Current.Port}\n\n程序目录：{_paths.BaseDirectory}\n共享目录：{_catalog.DirectoryPath}\n配置目录：{_paths.ConfigDirectory}\n日志目录：{_paths.LogsDirectory}", "关于", MessageBoxButton.OK, MessageBoxImage.Information, width: 650);
     }
 
     private async void DeleteFilesButton_Click(object sender, RoutedEventArgs e)
     {
         var selected = FilesGrid.SelectedItems.Cast<SharedFileItem>().ToArray();
         if (selected.Length == 0) return;
-        if (MessageBox.Show(this, $"确定删除选中的 {selected.Length} 个文件吗？此操作不可撤销。", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (ThemeDialog.Show(this, $"确定删除选中的 {selected.Length} 个文件吗？此操作不可撤销。", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning, "删除", "取消", dangerous: true) != MessageBoxResult.Yes) return;
         foreach (var file in selected)
         {
             try
@@ -371,7 +380,7 @@ public partial class MainWindow : Window
                            !string.Equals(_paths.ResolveUploadDirectory(previous.UploadDirectory), _paths.ResolveUploadDirectory(updated.UploadDirectory), StringComparison.OrdinalIgnoreCase);
         try
         {
-            if (!string.Equals(previous.UploadDirectory, updated.UploadDirectory, StringComparison.OrdinalIgnoreCase) && _activeImportTask is { IsCompleted: false } && MessageBox.Show(this, "当前正在添加文件，切换共享目录会取消添加任务，确定继续吗？", "添加文件进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (!string.Equals(previous.UploadDirectory, updated.UploadDirectory, StringComparison.OrdinalIgnoreCase) && _activeImportTask is { IsCompleted: false } && ThemeDialog.Show(this, "当前正在添加文件，切换共享目录会取消添加任务，确定继续吗？", "添加文件进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning, "取消添加并切换", "返回") != MessageBoxResult.Yes) return;
             if (!string.Equals(previous.UploadDirectory, updated.UploadDirectory, StringComparison.OrdinalIgnoreCase)) await CancelAndWaitForImportAsync();
             if (needsRestart && wasRunning) await _server.StopAsync();
             _config.Replace(updated, persist: false);
@@ -443,7 +452,7 @@ public partial class MainWindow : Window
     {
         if (_allowClose || _isClosing) return;
         e.Cancel = true;
-        if ((_transfers.ActiveCount > 0 || _activeImportTask is { IsCompleted: false }) && MessageBox.Show(this, "当前仍有文件传输或本地添加任务，退出会中断任务，确定继续吗？", "任务进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if ((_transfers.ActiveCount > 0 || _activeImportTask is { IsCompleted: false }) && ThemeDialog.Show(this, "当前仍有文件传输或本地添加任务，退出会中断任务，确定继续吗？", "任务进行中", MessageBoxButton.YesNo, MessageBoxImage.Warning, "继续退出", "返回", dangerous: true) != MessageBoxResult.Yes) return;
         _isClosing = true;
         IsEnabled = false;
         await CancelAndWaitForImportAsync();
@@ -590,13 +599,14 @@ public partial class MainWindow : Window
         Height = Math.Min(Height, Math.Max(MinHeight, workArea.Height - 28));
     }
 
-    private void ShowError(string title, string message) => MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    private void ShowError(string title, string message) => ThemeDialog.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
 
     private async Task OfferPortRecoveryAsync(int failedPort)
     {
-        var choice = MessageBox.Show(this,
-            $"端口 {failedPort} 已被占用。\n\n选择“是”改用 28081；选择“否”自动寻找可用高位端口；选择“取消”保持当前设置。",
-            "端口被占用", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+        var choice = ThemeDialog.Show(this,
+            $"端口 {failedPort} 已被占用。请选择改用 28081、自动寻找其他可用高位端口，或保持当前设置。",
+            "端口被占用", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning,
+            "改用 28081", "自动查找", "保持设置");
         if (choice == MessageBoxResult.Cancel) return;
 
         var port = choice == MessageBoxResult.Yes ? 28081 : FindAvailableHighPort();

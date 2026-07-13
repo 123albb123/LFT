@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using LanFileTransfer.App.Services;
 using QRCoder;
@@ -30,7 +31,19 @@ public partial class QrWindow : Window
     {
         if (!await ClipboardService.TrySetTextAsync(_address))
         {
-            MessageBox.Show(this, "Windows 剪贴板正被其他程序占用，请稍后重试。", "复制失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ThemeDialog.Show(this, "Windows 剪贴板正被其他程序占用，请稍后重试。", "复制失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed) DragMove();
+    }
+
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape) Close();
     }
 }

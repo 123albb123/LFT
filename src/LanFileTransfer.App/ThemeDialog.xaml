@@ -1,0 +1,106 @@
+<Window x:Class="LanFileTransfer.App.ThemeDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="提示" Width="500" SizeToContent="Height" MaxHeight="620"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="NoResize"
+        AllowsTransparency="True" Background="Transparent" ShowInTaskbar="False"
+        FontFamily="Microsoft YaHei UI" UseLayoutRounding="True" SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display" PreviewKeyDown="Window_PreviewKeyDown">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Green" Color="#147A4A"/>
+        <SolidColorBrush x:Key="GreenDark" Color="#0C5E37"/>
+        <SolidColorBrush x:Key="GreenSoft" Color="#E4F3E9"/>
+        <SolidColorBrush x:Key="Ink" Color="#17231C"/>
+        <SolidColorBrush x:Key="Muted" Color="#647169"/>
+        <SolidColorBrush x:Key="Line" Color="#DCE6DF"/>
+        <Style TargetType="Button">
+            <Setter Property="MinWidth" Value="82"/>
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
+            <Setter Property="Padding" Value="15,7"/>
+            <Setter Property="Background" Value="#E7EFE9"/>
+            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonBorder" Property="Opacity" Value="0.86"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource Green}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource Green}"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#B93A3A"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Margin" Value="3,0,0,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid>
+                            <Border Background="#EDF2EE" CornerRadius="5"/>
+                            <Track x:Name="PART_Track" IsDirectionReversed="True" Focusable="False">
+                                <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+                                <Track.Thumb><Thumb Background="#9BBEAA"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="{TemplateBinding Background}" CornerRadius="5"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+                                <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Margin="14" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="15">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="22" ShadowDepth="5" Opacity="0.22" Color="#24352B"/>
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="48"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="64"/>
+            </Grid.RowDefinitions>
+
+            <Border Background="#F3F8F4" CornerRadius="15,15,0,0" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                <Grid Margin="18,0,10,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="38"/></Grid.ColumnDefinitions>
+                    <TextBlock x:Name="TitleText" VerticalAlignment="Center" FontSize="15.5" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis"/>
+                    <Button Grid.Column="1" Content="×" Width="32" Height="32" MinWidth="0" MinHeight="0" Margin="0" Padding="0" Background="Transparent" FontSize="20" Foreground="{StaticResource Muted}" ToolTip="关闭" Click="CloseButton_Click"/>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" Margin="22,22,24,18">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="44"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border x:Name="IconCircle" Width="34" Height="34" CornerRadius="17" VerticalAlignment="Top" Background="{StaticResource GreenSoft}">
+                    <TextBlock x:Name="IconText" Text="i" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="19" FontWeight="Bold" Foreground="{StaticResource Green}"/>
+                </Border>
+                <ScrollViewer Grid.Column="1" MaxHeight="410" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <TextBlock x:Name="MessageText" Foreground="{StaticResource Ink}" FontSize="13.5" LineHeight="23" TextWrapping="Wrap"/>
+                </ScrollViewer>
+            </Grid>
+
+            <Border Grid.Row="2" Background="#F8FAF8" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" CornerRadius="0,0,15,15">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="18,0">
+                    <Button x:Name="CancelButton" Content="取消" Click="CancelButton_Click"/>
+                    <Button x:Name="NoButton" Content="否" Click="NoButton_Click"/>
+                    <Button x:Name="YesButton" Content="确定" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="YesButton_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
